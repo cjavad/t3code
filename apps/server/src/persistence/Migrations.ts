@@ -73,6 +73,7 @@ import Migration0058 from "./Migrations/058_LegacyV1ImportState.ts";
 import Migration0059 from "./Migrations/059_ApplicationEventSequenceIndexes.ts";
 import Migration0060 from "./Migrations/060_OrchestrationV2RecoveryIndexes.ts";
 import Migration0061 from "./Migrations/061_OrchestrationV2ShellIndexes.ts";
+import Migration0062 from "./Migrations/062_ReconcileRenumberedProjectionColumns.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -146,6 +147,7 @@ export const migrationEntries = [
   [59, "ApplicationEventSequenceIndexes", Migration0059],
   [60, "OrchestrationV2RecoveryIndexes", Migration0060],
   [61, "OrchestrationV2ShellIndexes", Migration0061],
+  [62, "ReconcileRenumberedProjectionColumns", Migration0062],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
