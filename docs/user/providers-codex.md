@@ -69,3 +69,18 @@ In an existing Codex thread, send `/feedback` with an optional description, for
 example `/feedback The agent stopped before finishing the tests`. This uploads
 the conversation and Codex logs to OpenAI. The returned thread ID can be shared
 with OpenAI support.
+
+## Manage a Codex Goal
+
+In a running Codex session, use `/goal create <objective>` to keep Codex working
+across turns toward an objective. Native continuation turns appear in the thread
+as work progresses. This requires a Codex version with native Goal support.
+
+Use `/goal status` to inspect progress, `/goal steer <objective>` to change the
+objective, `/goal pause` to pause, and `/goal resume` to continue. `/goal clear`
+removes the goal; `/goal reset` is an alias for clearing it. Send these commands
+without attachments. The goal is stored by Codex and shared across clients.
+
+Stop attempts to pause an active goal before interrupting its current turn.
+Goal controls require a running provider session; after a server or provider
+restart, send a normal message to reconnect the thread first.

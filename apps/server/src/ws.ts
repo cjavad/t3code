@@ -1,3 +1,8 @@
+import {
+  CodexGoalOperationError,
+  type CodexGoalOperation,
+  type ThreadId as CodexGoalThreadId,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Encoding from "effect/Encoding";
@@ -556,6 +561,37 @@ const makeWsRpcLayer = (
         return true;
       });
       const providerSessionsV2 = yield* ProviderSessionManagerV2;
+      const resolveCodexGoalRuntime = (
+        threadId: CodexGoalThreadId,
+        operation: CodexGoalOperation,
+      ) =>
+        Effect.gen(function* () {
+          const projection = yield* threadManagement.getThreadProjection(threadId);
+          const providerThread = projection.providerThreads.find(
+            (thread) => thread.id === projection.thread.activeProviderThreadId,
+          );
+          if (providerThread?.driver !== "codex" || providerThread.providerSessionId === null) {
+            return yield* new CodexGoalOperationError({
+              threadId,
+              operation,
+              cause: "Start a Codex thread before managing its goal.",
+            });
+          }
+          const runtime = Option.getOrNull(
+            yield* providerSessionsV2.get(providerThread.providerSessionId),
+          );
+          if (runtime?.codexGoal === undefined) {
+            return yield* new CodexGoalOperationError({
+              threadId,
+              operation,
+              cause: "The Codex session is not running. Resume the thread first.",
+            });
+          }
+          return { providerThread, goal: runtime.codexGoal };
+        }).pipe(
+          Effect.mapError((cause) => new CodexGoalOperationError({ threadId, operation, cause })),
+        );
+
       const analytics = yield* AnalyticsService.AnalyticsService;
       // Client-origin attribution (#7774): every thread/turn the connecting
       // client starts is credited to its surface + app version. Best-effort:
@@ -1629,6 +1665,59 @@ const makeWsRpcLayer = (
                 : providerRegistry.refresh()
             ).pipe(Effect.map((providers) => ({ providers }))),
             { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.codexGoalGet]: (input) =>
+          resolveCodexGoalRuntime(input.threadId, "get").pipe(
+            Effect.flatMap(({ providerThread, goal }) => goal.get(providerThread)),
+            Effect.mapError(
+              (cause) =>
+                new CodexGoalOperationError({ threadId: input.threadId, operation: "get", cause }),
+            ),
+          ),
+        [WS_METHODS.codexGoalSet]: (input) =>
+          resolveCodexGoalRuntime(input.threadId, "set").pipe(
+            Effect.flatMap(({ providerThread, goal }) => goal.set(providerThread, input)),
+            Effect.mapError(
+              (cause) =>
+                new CodexGoalOperationError({ threadId: input.threadId, operation: "set", cause }),
+            ),
+          ),
+        [WS_METHODS.codexGoalClear]: (input) =>
+          resolveCodexGoalRuntime(input.threadId, "clear").pipe(
+            Effect.flatMap(({ providerThread, goal }) => goal.clear(providerThread)),
+            Effect.mapError(
+              (cause) =>
+                new CodexGoalOperationError({
+                  threadId: input.threadId,
+                  operation: "clear",
+                  cause,
+                }),
+            ),
+          ),
+        [WS_METHODS.subscribeCodexGoal]: (input) =>
+          Stream.unwrap(
+            resolveCodexGoalRuntime(input.threadId, "subscribe").pipe(
+              Effect.flatMap(({ providerThread, goal }) =>
+                providerThread.providerInstanceId === input.providerInstanceId
+                  ? Effect.succeed(goal.subscribe(providerThread))
+                  : Effect.fail(
+                      new CodexGoalOperationError({
+                        threadId: input.threadId,
+                        operation: "subscribe",
+                        cause: "The thread's provider has changed.",
+                      }),
+                    ),
+              ),
+            ),
+          ).pipe(
+            Stream.mapError(
+              (cause) =>
+                new CodexGoalOperationError({
+                  threadId: input.threadId,
+                  operation: "subscribe",
+                  cause,
+                }),
+            ),
           ),
         [WS_METHODS.providerUploadFeedback]: (input) =>
           observeRpcEffect(
