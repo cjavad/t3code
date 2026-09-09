@@ -1,3 +1,4 @@
+import * as RuntimePolicyV2 from "./orchestration-v2/RuntimePolicy.ts";
 import {
   CodexGoalOperationError,
   type CodexGoalOperation,
@@ -577,9 +578,45 @@ const makeWsRpcLayer = (
               cause: "Start a Codex thread before managing its goal.",
             });
           }
-          const runtime = Option.getOrNull(
+          if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) {
+            return yield* new CodexGoalOperationError({
+              threadId,
+              operation,
+              cause: "Restore the thread before managing its goal.",
+            });
+          }
+          let runtime = Option.getOrNull(
             yield* providerSessionsV2.get(providerThread.providerSessionId),
           );
+          if (runtime === null && (operation === "set" || operation === "clear")) {
+            const modelSelection = projection.thread.modelSelection;
+            if (modelSelection.instanceId !== providerThread.providerInstanceId) {
+              return yield* new CodexGoalOperationError({
+                threadId,
+                operation,
+                cause: "Send a message with the selected provider before managing its goal.",
+              });
+            }
+            const runtimePolicy = yield* Effect.flatMap(RuntimePolicyV2.RuntimePolicyV2, (policy) =>
+              policy.resolve({ thread: projection.thread, modelSelection }),
+            ).pipe(Effect.provide(RuntimePolicyV2.layerFromProjectRepository));
+            const resumeFromSession = projection.providerSessions.find(
+              (session) => session.id === providerThread.providerSessionId,
+            );
+            runtime = yield* providerSessionsV2.open({
+              threadId,
+              providerSessionId: providerThread.providerSessionId,
+              modelSelection,
+              runtimePolicy,
+              ...(resumeFromSession === undefined ? {} : { resumeFromSession }),
+            });
+            yield* runtime.resumeThread({
+              threadId,
+              providerThread,
+              modelSelection,
+              runtimePolicy,
+            });
+          }
           if (runtime?.codexGoal === undefined) {
             return yield* new CodexGoalOperationError({
               threadId,

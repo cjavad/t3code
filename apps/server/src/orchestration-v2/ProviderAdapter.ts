@@ -496,6 +496,10 @@ export interface ProviderAdapterV2SessionRuntime {
   readonly hasPendingBackgroundWorkForThread?: (
     providerThread: OrchestrationV2ProviderThread,
   ) => Effect.Effect<boolean>;
+  /** Discard native work that has not yet been attached to an app run on archive/delete. */
+  readonly discardPendingTurns?: (
+    providerThread: OrchestrationV2ProviderThread,
+  ) => Effect.Effect<void, ProviderAdapterV2Error>;
   readonly codexGoal?: {
     readonly get: (
       providerThread: OrchestrationV2ProviderThread,

@@ -1,3 +1,4 @@
+import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import type {
   CodexGoal,
@@ -132,7 +133,11 @@ export function createThreadEnvironmentAtoms<R, E>(
     label: "environment-data:codex-goal",
     tag: WS_METHODS.subscribeCodexGoal,
     idleTtlMs: 0,
-    transform: (events) => events.pipe(Stream.map(applyCodexGoalStreamEvent)),
+    transform: (events) =>
+      events.pipe(
+        Stream.retry(Schedule.spaced("2 seconds")),
+        Stream.map(applyCodexGoalStreamEvent),
+      ),
   });
   return {
     codexGoal,

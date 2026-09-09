@@ -82,5 +82,6 @@ removes the goal; `/goal reset` is an alias for clearing it. Send these commands
 without attachments. The goal is stored by Codex and shared across clients.
 
 Stop attempts to pause an active goal before interrupting its current turn.
-Goal controls require a running provider session; after a server or provider
-restart, send a normal message to reconnect the thread first.
+After a server or provider restart, `/goal resume` reconnects the thread and
+resumes its saved goal. Status subscriptions do not wake a stopped session merely
+by opening a thread. Archiving or deleting a thread pauses its goal.
