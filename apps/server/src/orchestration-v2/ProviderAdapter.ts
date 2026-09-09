@@ -1,3 +1,4 @@
+import type { CodexGoal, CodexGoalSetInput, CodexGoalStreamEvent } from "@t3tools/contracts";
 import {
   ChatAttachment,
   CheckpointId,
@@ -496,6 +497,25 @@ export interface ProviderAdapterV2SessionRuntime {
   readonly hasPendingBackgroundWorkForThread?: (
     providerThread: OrchestrationV2ProviderThread,
   ) => Effect.Effect<boolean>;
+  /** Discard native work that has not yet been attached to an app run on archive/delete. */
+  readonly discardPendingTurns?: (
+    providerThread: OrchestrationV2ProviderThread,
+  ) => Effect.Effect<void, ProviderAdapterV2Error>;
+  readonly codexGoal?: {
+    readonly get: (
+      providerThread: OrchestrationV2ProviderThread,
+    ) => Effect.Effect<CodexGoal | null, ProviderAdapterV2Error>;
+    readonly set: (
+      providerThread: OrchestrationV2ProviderThread,
+      input: Omit<CodexGoalSetInput, "threadId">,
+    ) => Effect.Effect<CodexGoal, ProviderAdapterV2Error>;
+    readonly clear: (
+      providerThread: OrchestrationV2ProviderThread,
+    ) => Effect.Effect<{ readonly cleared: boolean }, ProviderAdapterV2Error>;
+    readonly subscribe: (
+      providerThread: OrchestrationV2ProviderThread,
+    ) => Stream.Stream<CodexGoalStreamEvent, ProviderAdapterV2Error>;
+  };
   readonly ensureThread: (
     input: ProviderAdapterV2EnsureThreadInput,
   ) => Effect.Effect<OrchestrationV2ProviderThread, ProviderAdapterV2Error>;

@@ -1,3 +1,12 @@
+import {
+  CodexGoal,
+  CodexGoalClearResult,
+  CodexGoalOperationError,
+  CodexGoalSetInput,
+  CodexGoalSubscriptionInput,
+  CodexGoalStreamEvent,
+  CodexGoalThreadInput,
+} from "./codexGoal.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -293,6 +302,11 @@ export const WS_METHODS = {
   providerInstallCancel: "provider.install.cancel",
   providerInstallSubscribe: "provider.install.subscribe",
   providerInstallRemove: "provider.install.remove",
+
+  codexGoalGet: "codex.goal.get",
+  codexGoalSet: "codex.goal.set",
+  codexGoalClear: "codex.goal.clear",
+  subscribeCodexGoal: "codex.goal.subscribe",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -1294,6 +1308,31 @@ const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTel
   stream: true,
 });
 
+export const WsCodexGoalGetRpc = Rpc.make(WS_METHODS.codexGoalGet, {
+  payload: CodexGoalThreadInput,
+  success: Schema.NullOr(CodexGoal),
+  error: Schema.Union([CodexGoalOperationError, EnvironmentAuthorizationError]),
+});
+
+export const WsCodexGoalSetRpc = Rpc.make(WS_METHODS.codexGoalSet, {
+  payload: CodexGoalSetInput,
+  success: CodexGoal,
+  error: Schema.Union([CodexGoalOperationError, EnvironmentAuthorizationError]),
+});
+
+export const WsCodexGoalClearRpc = Rpc.make(WS_METHODS.codexGoalClear, {
+  payload: CodexGoalThreadInput,
+  success: CodexGoalClearResult,
+  error: Schema.Union([CodexGoalOperationError, EnvironmentAuthorizationError]),
+});
+
+export const WsSubscribeCodexGoalRpc = Rpc.make(WS_METHODS.subscribeCodexGoal, {
+  payload: CodexGoalSubscriptionInput,
+  success: CodexGoalStreamEvent,
+  error: Schema.Union([CodexGoalOperationError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
@@ -1410,6 +1449,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewAutomationRespondRpc,
   WsPreviewAutomationFocusHostRpc,
   WsSubscribePreviewEventsRpc,
+  WsCodexGoalGetRpc,
+  WsCodexGoalSetRpc,
+  WsCodexGoalClearRpc,
+  WsSubscribeCodexGoalRpc,
   WsSubscribeDiscoveredLocalServersRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,

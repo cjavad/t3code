@@ -1777,6 +1777,24 @@ export const layerWithOptions = (
                 );
               }
             }
+            if (input.revokeMcpCredential === true) {
+              const live = (yield* Ref.get(sessions)).get(key);
+              const discard = live?.exposedRuntime.discardPendingTurns;
+              if (discard !== undefined) {
+                yield* projectionStore.getThreadProjection(input.threadId).pipe(
+                  Effect.flatMap((projection) =>
+                    Effect.forEach(
+                      projection.providerThreads.filter(
+                        (thread) => thread.providerSessionId === input.providerSessionId,
+                      ),
+                      (thread) => discard(thread).pipe(Effect.ignore),
+                      { discard: true },
+                    ),
+                  ),
+                  Effect.ignore,
+                );
+              }
+            }
             const detached = yield* Ref.modify(sessions, (current) => {
               const entry = current.get(key);
               if (entry === undefined || !entry.attachedThreadIds.has(input.threadId)) {
