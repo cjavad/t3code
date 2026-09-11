@@ -124,6 +124,7 @@ export function resolveResourceMonitorRustTargets(
     return [arch === "arm64" ? "aarch64-apple-darwin" : "x86_64-apple-darwin"];
   }
   if (platform === "linux") {
+    buildConfig.npmRebuild = false;
     return [arch === "arm64" ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu"];
   }
   return [arch === "arm64" ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc"];
@@ -2757,6 +2758,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "linux") {
+    buildConfig.npmRebuild = false;
     buildConfig.linux = {
       target: [target],
       executableName: "t3code",
@@ -2814,6 +2816,7 @@ const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(f
   }
 
   if (platform === "linux") {
+    buildConfig.npmRebuild = false;
     yield* stageLinuxIcons(stageResourcesDir, iconAssets.linuxIconPng, verbose);
     return;
   }
