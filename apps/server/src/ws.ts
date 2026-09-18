@@ -41,6 +41,7 @@ import {
   type GitActionProgressEvent,
   type GitManagerServiceError,
   AuthAccessWriteScope,
+  AuthCloudConnectUnassignedSubject,
   GitIdentityError,
   type MessageId,
   type AcpRegistryImportSessionInput,
@@ -1081,10 +1082,18 @@ const makeWsRpcLayer = (
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const authUsers = yield* AuthUsers.AuthUserRepository;
-      const currentUser = yield* authUsers.ensureForSubject({
-        subject: currentSession.subject,
-        now: DateTime.formatIso(yield* DateTime.now),
-      });
+      // A T3 Connect device nobody has claimed authenticates as the shared
+      // connect subject, which stands for a machine rather than a person. It
+      // gets no user row and its messages carry no author, so a thread cannot
+      // end up claiming "whichever laptop spoke first" as the identity its
+      // agents commit under.
+      const currentUser =
+        currentSession.subject === AuthCloudConnectUnassignedSubject
+          ? null
+          : yield* authUsers.ensureForSubject({
+              subject: currentSession.subject,
+              now: DateTime.formatIso(yield* DateTime.now),
+            });
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
       const intakeContext = yield* Effect.context<
@@ -1391,7 +1400,7 @@ const makeWsRpcLayer = (
                   },
                   createdBy: "user",
                   creationSource: "web",
-                  createdByUserId: currentUser.id,
+                  ...(currentUser === null ? {} : { createdByUserId: currentUser.id }),
                 }),
               ),
             );
@@ -1751,7 +1760,7 @@ const makeWsRpcLayer = (
               if (
                 command.type === "thread.metadata.update" &&
                 command.gitIdentityUserId != null &&
-                command.gitIdentityUserId !== currentUser.id &&
+                command.gitIdentityUserId !== currentUser?.id &&
                 !currentSession.scopes.includes(AuthAccessWriteScope)
               ) {
                 return yield* new OrchestrationV2DispatchCommandError({
@@ -1763,7 +1772,12 @@ const makeWsRpcLayer = (
               }
               const provenanced =
                 command.type === "thread.metadata.update" && command.gitIdentityUserId !== undefined
-                  ? { ...command, gitIdentityAssignedByUserId: currentUser.id }
+                  ? {
+                      ...command,
+                      ...(currentUser === null
+                        ? {}
+                        : { gitIdentityAssignedByUserId: currentUser.id }),
+                    }
                   : command;
               return yield* startup
                 .enqueueCommand(
@@ -1771,7 +1785,7 @@ const makeWsRpcLayer = (
                     ThreadManagementService.withCreationProvenance(provenanced, {
                       createdBy: "user",
                       creationSource: "creationSource" in command ? command.creationSource : "web",
-                      createdByUserId: currentUser.id,
+                      ...(currentUser === null ? {} : { createdByUserId: currentUser.id }),
                     }),
                   ).pipe(Effect.provide(intakeContext)),
                 )
@@ -1931,7 +1945,7 @@ const makeWsRpcLayer = (
                       }),
                   createdBy: "user",
                   creationSource: input.creationSource ?? "web",
-                  createdByUserId: currentUser.id,
+                  ...(currentUser === null ? {} : { createdByUserId: currentUser.id }),
                 }).pipe(Effect.provide(intakeContext)),
               )
               .pipe(
@@ -3327,7 +3341,13 @@ const makeWsRpcLayer = (
                   ),
                 ),
               );
-              return yield* Effect.forEach(users, (user) =>
+              // The connect subject is a machine, not a colleague: it can never
+              // hold a Git identity, so offering it as a commit author would
+              // only be a way to make commits fail.
+              const people = users.filter(
+                (user) => user.subject !== AuthCloudConnectUnassignedSubject,
+              );
+              return yield* Effect.forEach(people, (user) =>
                 gitIdentity.get(user.subject).pipe(
                   Effect.orElseSucceed(() => null),
                   Effect.map((profile) => ({
