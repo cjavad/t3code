@@ -339,6 +339,31 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
     }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
   );
 
+  it.effect("preserves an explicit pairing subject through browser session exchange", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+
+      const pairingCredential = yield* serverAuth.issuePairingCredential({
+        label: "Johan laptop",
+        subject: "johan",
+      });
+      expect(
+        (yield* serverAuth.listPairingLinks()).find((link) => link.id === pairingCredential.id)
+          ?.subject,
+      ).toBe("johan");
+      const exchanged = yield* serverAuth.createBrowserSession(
+        pairingCredential.credential,
+        requestMetadata,
+      );
+      const verified = yield* serverAuth.authenticateHttpRequest(
+        makeCookieRequest(sessions.cookieName, exchanged.sessionToken),
+      );
+
+      expect(verified.subject).toBe("johan");
+    }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
+  );
+
   it.effect("prefers a bearer token over a stale legacy cookie", () =>
     Effect.gen(function* () {
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
