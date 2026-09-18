@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import {
+  AuthCloudConnectUnassignedSubject,
   AuthRelayReadScope,
   AuthRelayWriteScope,
   AuthStandardClientScopes,
@@ -57,6 +58,7 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as CloudDevices from "../persistence/CloudDevices.ts";
 import { requireEnvironmentScope } from "../auth/http.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -356,6 +358,7 @@ const decodeCloudMintProof = Schema.decodeUnknownEffect(RelayCloudMintCredential
 
 interface CloudHttpDependencies {
   readonly secrets: ServerSecretStore.ServerSecretStore["Service"];
+  readonly cloudDevices: CloudDevices.CloudDeviceRepository["Service"];
   readonly environment: ServerEnvironment.ServerEnvironment["Service"];
   readonly endpointRuntime: ManagedEndpointRuntime.CloudManagedEndpointRuntime["Service"];
   readonly environmentAuth: EnvironmentAuth.EnvironmentAuth["Service"];
@@ -366,6 +369,7 @@ interface CloudHttpDependencies {
 const cloudHttpDependencies = Effect.gen(function* () {
   return {
     secrets: yield* ServerSecretStore.ServerSecretStore,
+    cloudDevices: yield* CloudDevices.CloudDeviceRepository,
     environment: yield* ServerEnvironment.ServerEnvironment,
     endpointRuntime: yield* ManagedEndpointRuntime.CloudManagedEndpointRuntime,
     environmentAuth: yield* EnvironmentAuth.EnvironmentAuth,
@@ -1010,9 +1014,33 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
     }
 
     const keyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(dependencies.secrets);
+    // Every client behind the relay proves the same linked cloud account, so
+    // the account cannot say who is typing. The DPoP key is per device, so the
+    // device is what a person is mapped to. An unmapped device still connects
+    // — it just acts for nobody, which means it cannot claim a thread's Git
+    // identity or commit as somebody.
+    yield* dependencies.cloudDevices
+      .recordSeen({
+        proofKeyThumbprint: proof.clientProofKeyThumbprint,
+        now: DateTime.formatIso(now),
+      })
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logError("T3 Connect device could not be recorded", { cause }),
+        ),
+      );
+    const deviceSubject = yield* dependencies.cloudDevices
+      .subjectFor(proof.clientProofKeyThumbprint)
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logError("T3 Connect device owner could not be read", { cause }).pipe(
+            Effect.as(null),
+          ),
+        ),
+      );
     const issued = yield* dependencies.environmentAuth.createPairingLink({
       scopes: AuthStandardClientScopes,
-      subject: "cloud-connect",
+      subject: deviceSubject ?? AuthCloudConnectUnassignedSubject,
       ttl: Duration.minutes(2),
       label: "T3 Connect connect",
       proofKeyThumbprint: proof.clientProofKeyThumbprint,
