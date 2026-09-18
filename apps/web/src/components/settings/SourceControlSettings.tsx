@@ -5,6 +5,7 @@ import * as Option from "effect/Option";
 import { useEffect, useState, type ReactNode } from "react";
 import type {
   BackgroundActivitySettings,
+  EnvironmentId,
   SourceControlProviderKind,
   SourceControlDiscoveryResult,
   SourceControlProviderAuth,
@@ -68,6 +69,9 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { Input } from "../ui/input";
+import { toastManager } from "../ui/toast";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
@@ -499,6 +503,95 @@ function EmptySourceControlDiscovery({
   );
 }
 
+function GitIdentitySettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const identity = useEnvironmentQuery(
+    sourceControlEnvironment.gitIdentity({ environmentId, input: {} }),
+  );
+  const update = useAtomCommand(sourceControlEnvironment.updateGitIdentity, {
+    reportFailure: false,
+  });
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+  const [githubToken, setGithubToken] = useState("");
+  const [initialized, setInitialized] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (initialized || identity.data === null) return;
+    setDisplayName(identity.data?.displayName ?? "");
+    setEmail(identity.data?.email ?? "");
+    setInitialized(true);
+  }, [identity.data, initialized]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const result = await update({
+        environmentId,
+        input: {
+          displayName,
+          email,
+          ...(githubToken.trim() ? { githubToken: githubToken.trim() } : {}),
+        },
+      });
+      if (result._tag === "Success") {
+        setGithubToken("");
+        identity.refresh();
+        toastManager.add({
+          type: "success",
+          title: "Git identity saved",
+          description: "New commits will use this identity and SSH signing key.",
+        });
+      } else {
+        toastManager.add({ type: "error", title: "Git identity could not be saved" });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SettingsSection title="Git identity and signing">
+      <div className="space-y-3 px-3 py-3 sm:px-4">
+        <p className="text-sm text-muted-foreground">
+          Commits are signed with a per-user Ed25519 SSH key. Add the public key to GitHub under
+          Settings → SSH and GPG keys → New SSH key → Signing key.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Input
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+            placeholder="Name"
+          />
+          <Input
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="Git email"
+            type="email"
+          />
+        </div>
+        <Input
+          value={githubToken}
+          onChange={(event) => setGithubToken(event.target.value)}
+          placeholder={
+            identity.data?.githubTokenConfigured
+              ? "GitHub token saved"
+              : "GitHub token for PRs (optional)"
+          }
+          type="password"
+        />
+        {identity.data?.signingKey ? (
+          <pre className="max-h-24 overflow-auto rounded-md bg-muted/40 p-2 text-[11px] text-muted-foreground">
+            {identity.data.signingKey}
+          </pre>
+        ) : null}
+        <Button size="sm" onClick={save} disabled={saving || !displayName.trim() || !email.trim()}>
+          {saving ? "Saving…" : "Save identity"}
+        </Button>
+      </div>
+    </SettingsSection>
+  );
+}
+
 export function SourceControlSettingsPanel() {
   const { scope, environment, connectedEnvironments } = useSettingsScope();
   // Discovery scans one machine's tools, so it shows the representative
@@ -598,6 +691,8 @@ export function SourceControlSettingsPanel() {
           onScan={handleScan}
         />
       )}
+
+      {environmentId !== null ? <GitIdentitySettings environmentId={environmentId} /> : null}
 
       <SourceControlWritingSettingsSection />
     </SettingsPageContainer>
