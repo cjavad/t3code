@@ -205,6 +205,9 @@ import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as GitIdentityService from "./auth/GitIdentityService.ts";
+import * as AuthUsers from "./persistence/AuthUsers.ts";
+import { makeGitExecutionEnvironment } from "./auth/GitExecutionEnvironment.ts";
+import * as McpProviderSession from "./mcp/McpProviderSession.ts";
 import { requiredScopeForRpcMethod } from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
@@ -593,6 +596,11 @@ const makeWsRpcLayer = (
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
+      const authUsers = yield* AuthUsers.AuthUserRepository;
+      const currentUser = yield* authUsers.ensureForSubject({
+        subject: currentSession.subject,
+        now: DateTime.formatIso(yield* DateTime.now),
+      });
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
       const intakeContext = yield* Effect.context<
@@ -715,6 +723,29 @@ const makeWsRpcLayer = (
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const gitIdentity = yield* GitIdentityService.GitIdentityService;
+      const config = yield* ServerConfig.ServerConfig;
+      const resolveAgentGitEnvironment = Effect.fn("ws.resolveAgentGitEnvironment")(function* (
+        subject: string,
+      ) {
+        const profile = yield* gitIdentity
+          .get(subject)
+          .pipe(Effect.catch(() => Effect.succeed(null)));
+        let identity: GitIdentityService.GitCommitIdentity | undefined;
+        if (profile?.signingKey !== null && profile !== null) {
+          identity = yield* gitIdentity
+            .resolveCommitIdentity(subject)
+            .pipe(Effect.catch(() => Effect.succeed(undefined)));
+        }
+        const token = yield* gitIdentity
+          .resolveGitHubToken(subject)
+          .pipe(Effect.catch(() => Effect.succeed(null)));
+        return makeGitExecutionEnvironment({
+          subject,
+          githubConfigDir: `${config.secretsDir}/gh-config/${NodeCrypto.createHash("sha256").update(subject, "utf8").digest("hex").slice(0, 40)}`,
+          ...(identity === undefined ? {} : { identity }),
+          ...(token === null ? {} : { githubToken: Redacted.value(token) }),
+        });
+      });
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -729,7 +760,6 @@ const makeWsRpcLayer = (
       const providerAuth = yield* ProviderAuthService;
       const providerInstallation = yield* makeProviderInstallation();
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
-      const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -928,6 +958,8 @@ const makeWsRpcLayer = (
               provider?.models[0]?.slug ??
               "default";
             const commandId = CommandId.make(NodeCrypto.randomUUID());
+            const agentGitEnvironment = yield* resolveAgentGitEnvironment(currentSession.subject);
+            McpProviderSession.setGitExecutionEnvironment(threadId, agentGitEnvironment);
             const launched = yield* Effect.result(
               startup.enqueueCommand(
                 threadLaunch.launch({
@@ -953,6 +985,7 @@ const makeWsRpcLayer = (
                   },
                   createdBy: "user",
                   creationSource: "web",
+                  createdByUserId: currentUser.id,
                 }),
               ),
             );
@@ -1719,29 +1752,39 @@ const makeWsRpcLayer = (
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
-            startup
-              .enqueueCommand(
-                ThreadMessageIntake.dispatchCommand(
-                  ThreadManagementService.withCreationProvenance(command, {
-                    createdBy: "user",
-                    creationSource: "creationSource" in command ? command.creationSource : "web",
+            Effect.gen(function* () {
+              const agentGitEnvironment = yield* resolveAgentGitEnvironment(currentSession.subject);
+              if ("threadId" in command) {
+                const threadId = command.threadId;
+                if (threadId !== undefined) {
+                  McpProviderSession.setGitExecutionEnvironment(threadId, agentGitEnvironment);
+                }
+              }
+              return yield* startup
+                .enqueueCommand(
+                  ThreadMessageIntake.dispatchCommand(
+                    ThreadManagementService.withCreationProvenance(command, {
+                      createdBy: "user",
+                      creationSource: "creationSource" in command ? command.creationSource : "web",
+                      createdByUserId: currentUser.id,
+                    }),
+                  ).pipe(Effect.provide(intakeContext)),
+                )
+                .pipe(
+                  Effect.tap(() => recordClientCommandAnalytics(command)),
+                  Effect.map((result) => ({ sequence: result.sequence })),
+                  Effect.mapError((cause) => {
+                    const detail = userFacingDispatchErrorMessage(cause);
+                    return new OrchestrationV2DispatchCommandError({
+                      commandId: command.commandId,
+                      commandType: command.type,
+                      message: detail ?? "Failed to dispatch orchestration V2 command",
+                      ...(detail === undefined ? {} : { detail }),
+                      cause,
+                    });
                   }),
-                ).pipe(Effect.provide(intakeContext)),
-              )
-              .pipe(
-                Effect.tap(() => recordClientCommandAnalytics(command)),
-                Effect.map((result) => ({ sequence: result.sequence })),
-                Effect.mapError((cause) => {
-                  const detail = userFacingDispatchErrorMessage(cause);
-                  return new OrchestrationV2DispatchCommandError({
-                    commandId: command.commandId,
-                    commandType: command.type,
-                    message: detail ?? "Failed to dispatch orchestration V2 command",
-                    ...(detail === undefined ? {} : { detail }),
-                    cause,
-                  });
-                }),
-              ),
+                );
+            }),
             {
               "rpc.aggregate": "orchestrationV2",
               "orchestration_v2.command_id": command.commandId,
@@ -1850,82 +1893,87 @@ const makeWsRpcLayer = (
         [ORCHESTRATION_V2_WS_METHODS.launchThread]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.launchThread,
-            startup
-              .enqueueCommand(
-                ThreadMessageIntake.launchThread({
-                  commandId: input.commandId,
-                  ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
-                  ...(input.reuseExistingThread === undefined
-                    ? {}
-                    : { reuseExistingThread: input.reuseExistingThread }),
-                  projectId: input.projectId,
-                  title: input.title,
-                  ...(input.generateTitle === undefined
-                    ? {}
-                    : { generateTitle: input.generateTitle }),
-                  modelSelection: input.modelSelection,
-                  runtimeMode: input.runtimeMode,
-                  interactionMode: input.interactionMode,
-                  workspaceStrategy: input.workspaceStrategy,
-                  ...(input.initialMessage === undefined
-                    ? {}
-                    : {
-                        initialMessage: {
-                          ...(input.initialMessage.messageId === undefined
-                            ? {}
-                            : { messageId: input.initialMessage.messageId }),
-                          text: input.initialMessage.text,
-                          attachments: input.initialMessage.attachments,
-                          ...(input.initialMessage.context === undefined
-                            ? {}
-                            : { context: input.initialMessage.context }),
-                        },
-                      }),
-                  createdBy: "user",
-                  creationSource: input.creationSource ?? "web",
-                }).pipe(Effect.provide(intakeContext)),
-              )
-              .pipe(
-                Effect.tap(() =>
-                  analytics
-                    .record("client.thread.started", originProps)
-                    .pipe(
-                      Effect.andThen(
-                        input.initialMessage === undefined
-                          ? Effect.void
-                          : analytics.record("client.turn.requested", originProps),
+            Effect.gen(function* () {
+              const agentGitEnvironment = yield* resolveAgentGitEnvironment(currentSession.subject);
+              return yield* startup
+                .enqueueCommand(
+                  ThreadMessageIntake.launchThread({
+                    commandId: input.commandId,
+                    ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+                    ...(input.reuseExistingThread === undefined
+                      ? {}
+                      : { reuseExistingThread: input.reuseExistingThread }),
+                    projectId: input.projectId,
+                    title: input.title,
+                    ...(input.generateTitle === undefined
+                      ? {}
+                      : { generateTitle: input.generateTitle }),
+                    modelSelection: input.modelSelection,
+                    runtimeMode: input.runtimeMode,
+                    interactionMode: input.interactionMode,
+                    workspaceStrategy: input.workspaceStrategy,
+                    ...(input.initialMessage === undefined
+                      ? {}
+                      : {
+                          initialMessage: {
+                            ...(input.initialMessage.messageId === undefined
+                              ? {}
+                              : { messageId: input.initialMessage.messageId }),
+                            text: input.initialMessage.text,
+                            attachments: input.initialMessage.attachments,
+                            ...(input.initialMessage.context === undefined
+                              ? {}
+                              : { context: input.initialMessage.context }),
+                          },
+                        }),
+                    createdBy: "user",
+                    creationSource: input.creationSource ?? "web",
+                    createdByUserId: currentUser.id,
+                    processEnvironment: agentGitEnvironment,
+                  }).pipe(Effect.provide(intakeContext)),
+                )
+                .pipe(
+                  Effect.tap(() =>
+                    analytics
+                      .record("client.thread.started", originProps)
+                      .pipe(
+                        Effect.andThen(
+                          input.initialMessage === undefined
+                            ? Effect.void
+                            : analytics.record("client.turn.requested", originProps),
+                        ),
+                        Effect.ignore,
                       ),
-                      Effect.ignore,
-                    ),
-                ),
-                Effect.map((result) => ({
-                  ...result,
-                  projection: projectThreadProjectionForWire(result.projection),
-                })),
-                Effect.catchTags({
-                  AttachmentClaimError: (cause) =>
-                    new OrchestrationV2ThreadLaunchError({
-                      commandId: input.commandId,
-                      projectId: input.projectId,
-                      message: cause.message,
-                      cause,
-                    }),
-                  ThreadLaunchError: (cause) =>
-                    new OrchestrationV2ThreadLaunchError({
-                      commandId: input.commandId,
-                      projectId: input.projectId,
-                      message: "Failed to launch thread",
-                      cause,
-                    }),
-                  ServerRuntimeStartupError: (cause) =>
-                    new OrchestrationV2ThreadLaunchError({
-                      commandId: input.commandId,
-                      projectId: input.projectId,
-                      message: "Failed to launch thread",
-                      cause,
-                    }),
-                }),
-              ),
+                  ),
+                  Effect.map((result) => ({
+                    ...result,
+                    projection: projectThreadProjectionForWire(result.projection),
+                  })),
+                  Effect.catchTags({
+                    AttachmentClaimError: (cause) =>
+                      new OrchestrationV2ThreadLaunchError({
+                        commandId: input.commandId,
+                        projectId: input.projectId,
+                        message: cause.message,
+                        cause,
+                      }),
+                    ThreadLaunchError: (cause) =>
+                      new OrchestrationV2ThreadLaunchError({
+                        commandId: input.commandId,
+                        projectId: input.projectId,
+                        message: "Failed to launch thread",
+                        cause,
+                      }),
+                    ServerRuntimeStartupError: (cause) =>
+                      new OrchestrationV2ThreadLaunchError({
+                        commandId: input.commandId,
+                        projectId: input.projectId,
+                        message: "Failed to launch thread",
+                        cause,
+                      }),
+                  }),
+                );
+            }),
             {
               "rpc.aggregate": "orchestration",
               "orchestration_v2.command_id": input.commandId,

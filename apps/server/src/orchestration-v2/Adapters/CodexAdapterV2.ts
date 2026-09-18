@@ -1437,7 +1437,10 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           providerSessionId: input.providerSessionId,
           runtimePolicy: input.runtimePolicy,
           settings: adapterOptions.settings,
-          environment: adapterOptions.environment,
+          environment: McpProviderSession.withGitExecutionEnvironmentForThread(
+            adapterOptions.environment,
+            input.threadId,
+          ),
         });
         const initialized = yield* Ref.make(false);
         const ensureInitialized = Effect.gen(function* () {

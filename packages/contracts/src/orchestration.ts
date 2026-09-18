@@ -1315,6 +1315,8 @@ export const ThreadInteractionModeSetPayload = Schema.Struct({
 export const ThreadMessageSentPayload = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
+  /** Stable user entity responsible for this message, when it was user-authored. */
+  createdByUserId: Schema.optional(TrimmedNonEmptyString),
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),

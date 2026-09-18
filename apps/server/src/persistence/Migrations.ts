@@ -69,6 +69,7 @@ import Migration0051 from "./Migrations/051_ProjectionThreadMessageContext.ts";
 import Migration0052 from "./Migrations/052_ProjectionThreadTitleState.ts";
 import Migration0053 from "./Migrations/053_PullRequestFilesViewed.ts";
 import Migration0054 from "./Migrations/054_OrchestrationV2.ts";
+import Migration0063 from "./Migrations/063_AuthUsers.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -137,6 +138,7 @@ export const migrationEntries = [
   // Released as 53 in V2 previews; reconcileV2PreviewMigration handles that collision.
   // Preserve this migration's schema. Future V2 schema changes need new migrations.
   [54, "OrchestrationV2", Migration0054],
+  [63, "AuthUsers", Migration0063],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
