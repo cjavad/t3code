@@ -1395,7 +1395,9 @@ const makeWsRpcLayer = (
                   },
                   createdBy: "user",
                   creationSource: "web",
-                  ...(currentUser === null ? {} : { createdByUserId: currentUser.id }),
+                  ...(currentUser === null
+                    ? {}
+                    : { createdByUserId: currentUser.id, createdByName: currentUser.displayName }),
                 }),
               ),
             );
@@ -1780,7 +1782,12 @@ const makeWsRpcLayer = (
                     ThreadManagementService.withCreationProvenance(provenanced, {
                       createdBy: "user",
                       creationSource: "creationSource" in command ? command.creationSource : "web",
-                      ...(currentUser === null ? {} : { createdByUserId: currentUser.id }),
+                      ...(currentUser === null
+                        ? {}
+                        : {
+                            createdByUserId: currentUser.id,
+                            createdByName: currentUser.displayName,
+                          }),
                     }),
                   ).pipe(Effect.provide(intakeContext)),
                 )
@@ -1940,7 +1947,9 @@ const makeWsRpcLayer = (
                       }),
                   createdBy: "user",
                   creationSource: input.creationSource ?? "web",
-                  ...(currentUser === null ? {} : { createdByUserId: currentUser.id }),
+                  ...(currentUser === null
+                    ? {}
+                    : { createdByUserId: currentUser.id, createdByName: currentUser.displayName }),
                 }).pipe(Effect.provide(intakeContext)),
               )
               .pipe(

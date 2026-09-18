@@ -85,6 +85,8 @@ const OrchestrationV2CreationFields = {
   creationSource: OrchestrationV2CreationSource,
   /** Stable user entity responsible for a user-created record. */
   createdByUserId: Schema.optional(TrimmedNonEmptyString),
+  /** Display-name snapshot for `createdByUserId`, resolved once at write time. */
+  createdByName: Schema.optional(TrimmedNonEmptyString),
 } as const;
 
 export const OrchestrationV2NativeRefStrength = Schema.Literals(["strong", "weak", "none"]);
@@ -867,7 +869,7 @@ export const OrchestrationV2ConversationMessage = Schema.Struct({
   threadId: ThreadId,
   runId: Schema.NullOr(RunId),
   nodeId: Schema.NullOr(NodeId),
-  role: Schema.Literals(["user", "assistant", "system"]),
+  role: Schema.Literals(["user", "assistant", "system", "note"]),
   text: Schema.String,
   context: Schema.optional(OrchestrationMessageContext),
   attachments: Schema.Array(ChatAttachment),
@@ -2509,6 +2511,8 @@ export const OrchestrationV2Command = Schema.Union([
       Schema.Struct({ type: Schema.Literal("restart_active"), targetRunId: RunId }),
       Schema.Struct({ type: Schema.Literal("queue_after_active") }),
       Schema.Struct({ type: Schema.Literal("start_immediately") }),
+      /** A human-only note: appended to the transcript, never sent to a provider. */
+      Schema.Struct({ type: Schema.Literal("note") }),
     ]),
   }),
   Schema.Struct({
