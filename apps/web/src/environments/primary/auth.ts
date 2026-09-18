@@ -352,9 +352,11 @@ export async function submitServerAuthCredential(credential: string): Promise<vo
 
 export async function createServerPairingCredential(input?: {
   readonly label?: string;
+  readonly subject?: string;
   readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
 }): Promise<AuthPairingCredentialResult> {
   const trimmedLabel = input?.label?.trim();
+  const trimmedSubject = input?.subject?.trim();
   try {
     return await runPrimaryHttp(
       PrimaryEnvironmentHttpClient.pipe(
@@ -363,6 +365,7 @@ export async function createServerPairingCredential(input?: {
             headers: {},
             payload: {
               ...(trimmedLabel ? { label: trimmedLabel } : {}),
+              ...(trimmedSubject ? { subject: trimmedSubject } : {}),
               ...(input?.scopes ? { scopes: input.scopes } : {}),
             },
           }),
