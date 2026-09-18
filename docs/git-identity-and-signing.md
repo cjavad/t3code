@@ -1,6 +1,8 @@
 # Per-user Git identity and signing
 
-This fork associates Git actions with the authenticated T3 session subject. Give each pairing link a distinct label (the label becomes its subject) so people do not share an identity. Configure the identity in **Settings → Source control → Git identity and signing** (the same controls are available in the mobile app).
+This fork associates Git actions with the authenticated T3 session subject. Create pairing links with a device-specific **Client label** and a stable per-person **Identity subject**. Use the same subject for that person on every device, and different subjects for different people. Configure the identity in **Settings → Source control → Git identity and signing** (the same controls are available in the mobile app).
+
+Subjects are intentionally fixed when a pairing link is issued. To move a client to another person, revoke its session and create a new pairing link; changing the subject in place would silently move its Git identity, signing key, and stored provider credentials.
 
 Saving an identity creates an Ed25519 SSH signing key on the server. The private key stays in the server secrets directory and is never returned over RPC. Copy the displayed public key to GitHub under **Settings → SSH and GPG keys → New SSH key**, select **Signing key**, and use the configured Git email for commits. GitHub will then show commits made by T3 as **Verified**.
 
