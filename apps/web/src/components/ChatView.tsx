@@ -3686,9 +3686,28 @@ export default function ChatView(props: ChatViewProps) {
     }
     return urls;
   }, [attachmentPreviewHandoffByMessageId, serverAttachmentUrlById, serverVisibleTurnItems]);
-  const anchoredTimelineMessages = useMemo(
+  // Notes carry no run and no turn item, so they arrive only through the
+  // projection. Surface them where they sit in the transcript.
+  const noteTimelineMessages = useMemo<ChatMessage[]>(
     () =>
-      feedbackSubmissions.flatMap((submission) =>
+      (serverProjection?.messages ?? [])
+        .filter((message) => message.role === "note")
+        .map((message) => ({
+          id: message.id,
+          role: "note" as const,
+          text: message.text,
+          ...(message.attachments.length > 0 ? { attachments: message.attachments } : {}),
+          ...(message.createdByName === undefined ? {} : { createdByName: message.createdByName }),
+          runId: null,
+          streaming: false,
+          createdAt: DateTime.formatIso(message.createdAt),
+          updatedAt: DateTime.formatIso(message.updatedAt),
+        })),
+    [serverProjection?.messages],
+  );
+  const anchoredTimelineMessages = useMemo(
+    () => [
+      ...feedbackSubmissions.flatMap((submission) =>
         submission.status === "interrupted"
           ? []
           : [
@@ -3696,7 +3715,9 @@ export default function ChatView(props: ChatViewProps) {
               { ...codexFeedbackMessage(submission, "assistant"), runId: null },
             ],
       ),
-    [feedbackSubmissions],
+      ...noteTimelineMessages,
+    ],
+    [feedbackSubmissions, noteTimelineMessages],
   );
   const timelineProjectionRef = useRef<{
     readonly threadKey: string | null;
@@ -7896,6 +7917,27 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
 
+    // `/note <text>` is a human-only message: it is appended for other people in
+    // the thread, and it is never sent to a provider or started as a turn.
+    const noteMatch = /^\/note(?:\s+|$)/u.exec(promptRef.current.trimStart());
+    const noteMode = noteMatch !== null;
+    if (noteMode) {
+      if (!isServerThread) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Notes need an existing thread",
+            description: "Send a first message before leaving a note.",
+          }),
+        );
+        return;
+      }
+      const noteBody = promptRef.current.trimStart().slice(noteMatch[0].length);
+      promptRef.current = noteBody;
+      setComposerDraftPrompt(composerDraftTarget, noteBody);
+      composerRef.current?.resetCursorState();
+    }
+
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
       toastManager.add(
@@ -8404,7 +8446,7 @@ export default function ChatView(props: ChatViewProps) {
       effort: ctxSelectedPromptEffort,
       text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
     });
-    if (composerRef.current?.validateProviderInput(outgoingMessageText) === false) {
+    if (!noteMode && composerRef.current?.validateProviderInput(outgoingMessageText) === false) {
       return;
     }
 
@@ -8868,17 +8910,17 @@ export default function ChatView(props: ChatViewProps) {
       ...existing,
       {
         id: messageIdForSend,
-        role: "user",
-        text: outgoingMessageText,
+        role: noteMode ? "note" : "user",
+        text: noteMode ? messageTextForSend : outgoingMessageText,
         ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
         ...(outgoingMessageContext !== undefined ? { context: outgoingMessageContext } : {}),
         runId: null,
         createdAt: messageCreatedAt,
         updatedAt: messageCreatedAt,
         streaming: false,
-        ...(shouldQueueBehindActiveRun
+        ...(!noteMode && shouldQueueBehindActiveRun
           ? { inputIntent: "queued_turn" as const }
-          : phase === "running" && dispatchMode === "steer"
+          : !noteMode && phase === "running" && dispatchMode === "steer"
             ? { inputIntent: "steer" as const }
             : {}),
       },
@@ -9004,7 +9046,7 @@ export default function ChatView(props: ChatViewProps) {
           message: {
             messageId: messageIdForSend,
             role: "user",
-            text: outgoingMessageText,
+            text: noteMode ? messageTextForSend : outgoingMessageText,
             attachments: turnAttachmentsResult.value,
             ...(() => {
               const context = buildOutgoingMessageContext(
@@ -9034,11 +9076,15 @@ export default function ChatView(props: ChatViewProps) {
             })(),
           },
           modelSelection: ctxSelectedModelSelection,
-          titleSeed: title,
+          ...(noteMode
+            ? { mode: "note" as const }
+            : {
+                titleSeed: title,
+                dispatchMode,
+                ...(bootstrap ? { bootstrap } : {}),
+              }),
           runtimeMode,
           interactionMode: sendInteractionMode,
-          dispatchMode,
-          ...(bootstrap ? { bootstrap } : {}),
           createdAt: messageCreatedAt,
         },
       });

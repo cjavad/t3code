@@ -91,13 +91,14 @@ export function isBrowserPreviewAttachment(attachment: ChatFileAttachment): bool
 export interface ChatMessage {
   readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
   readonly id: MessageId;
-  readonly role: "user" | "assistant" | "system";
+  readonly role: "user" | "assistant" | "system" | "note";
   readonly text: string;
   readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
   readonly runId: RunId | null;
   readonly streaming: boolean;
   readonly createdBy?: OrchestrationV2Actor;
   readonly creationSource?: OrchestrationV2CreationSource;
+  readonly createdByName?: string;
   readonly scheduledTaskId?: ScheduledTaskId;
   readonly senderThreadId?: ThreadId;
   readonly createdAt: string;

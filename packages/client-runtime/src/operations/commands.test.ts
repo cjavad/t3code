@@ -317,6 +317,42 @@ describe("V2 environment commands", () => {
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 
+  it.effect("dispatches a note with no title seed and no run mode", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const supervisor = yield* makeSupervisor({ commands, projects: [] });
+
+      yield* startThreadTurn({
+        commandId: CommandId.make("note-message"),
+        threadId: v2ThreadId,
+        message: {
+          messageId: MessageId.make("message-note"),
+          role: "user",
+          text: "Ping the customer before shipping.",
+          attachments: [],
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        mode: "note",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).toMatchObject({
+        type: "message.dispatch",
+        commandId: "note-message",
+        threadId: v2ThreadId,
+        messageId: "message-note",
+        text: "Ping the customer before shipping.",
+        dispatchMode: { type: "note" },
+      });
+      expect(commands[0]).not.toHaveProperty("titleSeed");
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
   it.effect("preserves an existing worktree and branch during first-message launch", () =>
     Effect.gen(function* () {
       const launches: OrchestrationV2ThreadLaunchInput[] = [];
