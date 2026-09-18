@@ -84,6 +84,14 @@ export const AuthTerminalOperateScope = "terminal:operate" as const;
 export const AuthReviewWriteScope = "review:write" as const;
 export const AuthAccessReadScope = "access:read" as const;
 export const AuthAccessWriteScope = "access:write" as const;
+
+/**
+ * Subject a T3 Connect device authenticates as until somebody says whose it
+ * is. Every client behind the relay proves the same linked cloud account, so
+ * this stands for "a device on that account", never for a person: it holds no
+ * Git identity and cannot be assigned one.
+ */
+export const AuthCloudConnectUnassignedSubject = "cloud-connect" as const;
 export const AuthRelayReadScope = "relay:read" as const;
 export const AuthRelayWriteScope = "relay:write" as const;
 export const AuthEnvironmentScope = Schema.Literals([
@@ -228,6 +236,34 @@ export const AuthPairingLink = Schema.Struct({
   expiresAt: Schema.DateTimeUtc,
 });
 export type AuthPairingLink = typeof AuthPairingLink.Type;
+
+/**
+ * A device that has connected through T3 Connect, keyed by the proof key it
+ * holds. `subject` is who it acts as; null means nobody has claimed it, so it
+ * can browse and drive agents but cannot author messages or own a thread's
+ * Git identity.
+ */
+export const AuthCloudDevice = Schema.Struct({
+  proofKeyThumbprint: TrimmedNonEmptyString,
+  /** `auth_users.id` the device acts as; null when nobody has claimed it. */
+  userId: Schema.NullOr(TrimmedNonEmptyString),
+  label: Schema.NullOr(TrimmedNonEmptyString),
+  firstSeenAt: Schema.DateTimeUtc,
+  lastSeenAt: Schema.DateTimeUtc,
+  assignedByUserId: Schema.NullOr(TrimmedNonEmptyString),
+  assignedAt: Schema.NullOr(Schema.DateTimeUtc),
+});
+export type AuthCloudDevice = typeof AuthCloudDevice.Type;
+
+export const AuthAssignCloudDeviceInput = Schema.Struct({
+  proofKeyThumbprint: TrimmedNonEmptyString,
+  /** Null unassigns the device. */
+  userId: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type AuthAssignCloudDeviceInput = typeof AuthAssignCloudDeviceInput.Type;
+
+export const AuthCloudDeviceAssignResult = Schema.Struct({ assigned: Schema.Boolean });
+export type AuthCloudDeviceAssignResult = typeof AuthCloudDeviceAssignResult.Type;
 
 export const AuthClientMetadata = Schema.Struct({
   label: Schema.optionalKey(TrimmedNonEmptyString),
