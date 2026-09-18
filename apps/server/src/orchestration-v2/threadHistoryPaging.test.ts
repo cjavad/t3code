@@ -626,6 +626,29 @@ describe("threadHistoryPaging", () => {
     expect(bounded.projection.plans[0]).toEqual(actionable.plans[0]);
   });
 
+  it("keeps human notes that no turn item references", () => {
+    const base = makeProjection([]);
+    const note = {
+      id: MessageId.make("note-1"),
+      threadId: THREAD,
+      runId: null,
+      nodeId: null,
+      role: "note",
+      text: "Ping the customer before shipping.",
+      attachments: [],
+      streaming: false,
+      createdBy: "user",
+      creationSource: "web",
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const projection = { ...base, messages: [note] } as unknown as typeof base;
+
+    const bounded = buildBoundedThreadProjection({ projection, snapshotSequence: 9 });
+
+    expect(bounded.projection.messages.map((message) => message.id)).toContain("note-1");
+  });
+
   it("keeps paged historical plan detail in the turn item and only status in its artifact", () => {
     const detail = "Implement the historical plan exactly.\n".repeat(1_000);
     const item = {
