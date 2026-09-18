@@ -22,6 +22,19 @@ export const GitIdentityUpdateInput = Schema.Struct({
 });
 export type GitIdentityUpdateInput = typeof GitIdentityUpdateInput.Type;
 
+/**
+ * A user a thread's Git identity can be assigned to. `identityConfigured` is
+ * false for someone who has signed in but never set up a Git profile: assigning
+ * a thread to them is allowed, but its agents will not be able to commit until
+ * they do.
+ */
+export const GitIdentityUser = Schema.Struct({
+  userId: TrimmedNonEmptyString,
+  displayName: Schema.String,
+  identityConfigured: Schema.Boolean,
+});
+export type GitIdentityUser = typeof GitIdentityUser.Type;
+
 export class GitIdentityError extends Schema.TaggedError<GitIdentityError>()("GitIdentityError", {
   reason: Schema.Literals(["not_configured", "invalid_email", "key_generation_failed", "storage"]),
   detail: Schema.String,

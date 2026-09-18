@@ -2188,6 +2188,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
     }
 
+    // A thread's Git identity is inherited by the provider process at spawn
+    // time; an already-running process keeps the environment it started with.
+    // Changing it therefore has to end the current session so the next run
+    // starts as the newly assigned user.
+    const gitIdentityChanges =
+      command.type === "thread.metadata.update" &&
+      command.gitIdentityUserId !== undefined &&
+      command.gitIdentityUserId !== (thread.gitIdentity?.userId ?? null);
     const needsProviderState =
       command.type === "thread.runtime-mode.set" ||
       command.type === "thread.model-selection.set" ||
@@ -2196,7 +2204,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       command.type === "thread.settle" ||
       (command.type === "thread.metadata.update" &&
         command.worktreePath !== undefined &&
-        command.worktreePath !== thread.worktreePath);
+        command.worktreePath !== thread.worktreePath) ||
+      gitIdentityChanges;
     const providerContext = needsProviderState
       ? yield* projectionStore
           .getThreadProviderContext(
@@ -2452,6 +2461,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     Date.parse(thread.limitRecovery.resetAt)
                 ? { snoozedUntil: null, snoozedAt: null }
                 : {}),
+            ...(command.gitIdentityUserId === undefined
+              ? {}
+              : {
+                  gitIdentity:
+                    command.gitIdentityUserId === null
+                      ? null
+                      : {
+                          userId: command.gitIdentityUserId,
+                          source: "explicit" as const,
+                          assignedByUserId: command.gitIdentityAssignedByUserId ?? null,
+                          assignedAt: now,
+                        },
+                }),
             ...(command.branch === undefined ? {} : { branch: command.branch }),
             ...(command.worktreePath === undefined ? {} : { worktreePath: command.worktreePath }),
             ...(command.linkedPullRequest === undefined
@@ -2786,8 +2808,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       command.type === "thread.archive" || command.type === "thread.settle"
         ? (providerContext?.providerSessions ?? []).map((session) => session.id)
         : command.type === "thread.metadata.update" &&
-            command.worktreePath !== undefined &&
-            command.worktreePath !== thread.worktreePath
+            (gitIdentityChanges ||
+              (command.worktreePath !== undefined && command.worktreePath !== thread.worktreePath))
           ? (providerContext?.providerSessions ?? []).map((session) => session.id)
           : command.type === "thread.runtime-mode.set"
             ? (providerContext?.providerSessions ?? [])
@@ -2826,7 +2848,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     : command.type === "thread.settle"
                       ? "Thread settled."
                       : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
+                        ? gitIdentityChanges
+                          ? "Git identity changed."
+                          : "Workspace changed."
                         : command.type === "thread.runtime-mode.set"
                           ? "Runtime mode changed."
                           : "Provider or model selection changed.",
@@ -2845,7 +2869,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     : command.type === "thread.settle"
                       ? "Thread settled."
                       : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
+                        ? gitIdentityChanges
+                          ? "Git identity changed."
+                          : "Workspace changed."
                         : command.type === "thread.runtime-mode.set"
                           ? "Runtime mode changed."
                           : "Provider or model selection changed.",
@@ -3945,6 +3971,42 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
         projection = yield* getProjectionWithPendingEvents(command.threadId, events);
       }
+      // The first genuine user message claims the thread for its sender, and
+      // every later run commits as that person no matter who continues the
+      // thread. Creation deliberately claims nothing, so forks, imports and
+      // scheduled shells stay unassigned until somebody actually speaks in
+      // them. Commands are decided serially per thread, so two racing first
+      // messages cannot both claim.
+      if (
+        projection.thread.gitIdentity == null &&
+        command.createdBy === "user" &&
+        command.createdByUserId !== undefined &&
+        !isNativeMaintenanceCommand(command)
+      ) {
+        const claimedAt = yield* DateTime.now;
+        const claimed: OrchestrationV2AppThread = {
+          ...projection.thread,
+          gitIdentity: {
+            userId: command.createdByUserId,
+            source: "first_message",
+            assignedByUserId: command.createdByUserId,
+            assignedAt: claimedAt,
+          },
+          updatedAt: claimedAt,
+        };
+        yield* emit(
+          events,
+          command,
+        )({
+          type: "thread.metadata-updated",
+          threadId: command.threadId,
+          providerInstanceId: claimed.providerInstanceId,
+          occurredAt: claimedAt,
+          payload: claimed,
+        });
+        projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      }
+
       const userMessages = projection.messages.filter((message) => message.role === "user");
       const onlyMaintenanceHistory =
         userMessages.length > 0 && userMessages.every(isNativeMaintenanceCommand);

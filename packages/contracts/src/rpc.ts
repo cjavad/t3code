@@ -112,7 +112,12 @@ import {
   VcsStatusResult,
   VcsStatusStreamEvent,
 } from "./git.ts";
-import { GitIdentityError, GitIdentityProfile, GitIdentityUpdateInput } from "./gitIdentity.ts";
+import {
+  GitIdentityError,
+  GitIdentityProfile,
+  GitIdentityUpdateInput,
+  GitIdentityUser,
+} from "./gitIdentity.ts";
 import {
   ReviewDiffFileContentsInput,
   ReviewDiffFileContentsResult,
@@ -373,6 +378,7 @@ export const WS_METHODS = {
   gitRunStackedAction: "git.runStackedAction",
   gitIdentityGet: "git.identity.get",
   gitIdentityUpdate: "git.identity.update",
+  gitIdentityUsers: "git.identity.users",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
@@ -1214,6 +1220,13 @@ const WsGitIdentityUpdateRpc = Rpc.make(WS_METHODS.gitIdentityUpdate, {
   error: Schema.Union([GitIdentityError, EnvironmentAuthorizationError]),
 });
 
+/** Everyone a thread's Git identity can be assigned to. */
+const WsGitIdentityUsersRpc = Rpc.make(WS_METHODS.gitIdentityUsers, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(GitIdentityUser),
+  error: Schema.Union([GitIdentityError, EnvironmentAuthorizationError]),
+});
+
 const WsGitResolvePullRequestRpc = Rpc.make(WS_METHODS.gitResolvePullRequest, {
   payload: GitPullRequestRefInput,
   success: GitResolvePullRequestResult,
@@ -1742,6 +1755,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitRunStackedActionRpc,
   WsGitIdentityGetRpc,
   WsGitIdentityUpdateRpc,
+  WsGitIdentityUsersRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,

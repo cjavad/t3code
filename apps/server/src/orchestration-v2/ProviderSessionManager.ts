@@ -31,6 +31,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
+import { ThreadGitEnvironment } from "../auth/ThreadGitEnvironmentService.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import { IdAllocatorV2 } from "./IdAllocator.ts";
 import { makeKeyedSerialExecutor } from "./KeyedSerialExecutor.ts";
@@ -315,10 +316,41 @@ export const layerWithOptions = (
        */
       const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
       const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
+      /**
+       * Optional for the same reason as the settings above: focused tests
+       * assemble this layer by hand and never spawn a real process. Production
+       * always provides it, and without it a provider process simply inherits
+       * no Git identity, which makes its commits fail loudly rather than land
+       * under the wrong name.
+       */
+      const threadGitEnvironment = yield* Effect.serviceOption(ThreadGitEnvironment);
       const eventSink = yield* EventSinkV2;
       const idAllocator = yield* IdAllocatorV2;
       const providerEventIngestor = yield* ProviderEventIngestorV2;
       const projectionStore = yield* ProjectionStoreV2;
+      /**
+       * Installs the identity a thread's agents commit as, for the process this
+       * open is about to spawn. A failure to read the thread leaves whatever is
+       * installed alone: the commit itself still refuses an empty identity, and
+       * blocking the run would turn a Git problem into an outage.
+       */
+      const applyThreadGitIdentity = (threadId: ThreadId) =>
+        Option.isNone(threadGitEnvironment)
+          ? Effect.void
+          : projectionStore.getThread(threadId).pipe(
+              Effect.flatMap((thread) =>
+                threadGitEnvironment.value.applyToThread(threadId, thread.gitIdentity ?? null),
+              ),
+              Effect.catch((cause) =>
+                Effect.logError(
+                  "thread git identity could not be resolved for a provider session",
+                  {
+                    threadId,
+                    cause,
+                  },
+                ),
+              ),
+            );
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
         function* (threadId: ThreadId) {
           if (Option.isNone(serverSettings)) return { browser: true, device: false };
@@ -1570,6 +1602,14 @@ export const layerWithOptions = (
                 return existing.exposedRuntime;
               }
 
+              // Spawning is the moment a thread's Git identity is fixed for the
+              // life of the process, so it is resolved here — from the thread,
+              // not from whoever is connected — and before the MCP session is
+              // prepared, since that bakes the environment into the process. A
+              // reused live session above is deliberately left alone: its
+              // environment cannot be rewritten, which is why reassigning an
+              // identity detaches the session instead.
+              yield* applyThreadGitIdentity(input.threadId);
               const adapter = yield* registry.get(input.modelSelection.instanceId).pipe(
                 Effect.mapError(
                   (cause) =>
