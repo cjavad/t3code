@@ -362,6 +362,58 @@ const SharedApplicationDataPlaneTestLayer = Layer.merge(
 );
 
 it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
+  it.effect("records a note as a message that starts no run", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* OrchestratorV2;
+      const threadId = ThreadId.make("runtime-layer-note-thread");
+
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-note-create"),
+        threadId,
+        projectId: ProjectId.make("runtime-layer-note-project"),
+        title: "Note thread",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+
+      const result = yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-note-dispatch"),
+        threadId,
+        messageId: MessageId.make("runtime-layer-note-message"),
+        text: "Ping the customer before shipping this.",
+        attachments: [],
+        createdByUserId: "user:johan",
+        createdByName: "Johan",
+        dispatchMode: { type: "note" },
+      });
+
+      const projection = yield* orchestrator.getThreadProjection(threadId);
+      const note = projection.messages.find(
+        (message) => message.id === "runtime-layer-note-message",
+      );
+      assert.equal(note?.role, "note");
+      assert.equal(note?.runId, null);
+      assert.equal(note?.createdByName, "Johan");
+      // A note is not a turn: it must not start a run, allocate a turn item, or
+      // touch the provider in any way.
+      assert.deepEqual(projection.runs, []);
+      assert.deepEqual(projection.turnItems, []);
+      assert.deepEqual(
+        result.storedEvents.map((stored) => stored.event.type),
+        ["message.updated", "thread.metadata-updated"],
+      );
+    }),
+  );
+
   it.effect("emits model updates separately from provider switches", () =>
     Effect.gen(function* () {
       const orchestrator = yield* OrchestratorV2;

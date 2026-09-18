@@ -130,6 +130,7 @@ import {
   SearchIcon,
   SmartphoneIcon,
   SquarePenIcon,
+  StickyNoteIcon,
   TerminalIcon,
   Undo2Icon,
   HammerIcon,
@@ -1773,6 +1774,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "attempt-fold" ? <AttemptFoldTimelineRow row={row} /> : null}
       {row.kind === "context-compaction" ? <ContextCompactionTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
+      {row.kind === "message" && row.message.role === "note" ? <NoteTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
       ) : null}
@@ -2222,7 +2224,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         <div className="flex shrink-0 items-center gap-2">
           <Tooltip>
             <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
-              {formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat)}
+              {row.message.createdByName
+                ? `${row.message.createdByName} · ${formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat)}`
+                : formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat)}
             </TooltipTrigger>
             <TooltipPopup>
               {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
@@ -2438,6 +2442,80 @@ function AttemptFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "at
       <span className="text-xs font-medium text-foreground/80">{row.label}</span>
       <span className="text-2xs text-muted-foreground">Partial output retained</span>
     </button>
+  );
+}
+
+/**
+ * A note is a message for the other people in the thread. It carries no run and
+ * is never sent to a provider, so it renders as commentary rather than a turn.
+ */
+function NoteTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
+  const ctx = use(TimelineRowCtx);
+  const message = row.message;
+  const resources = useMemo(
+    () => selectMessageImageResources(message.attachments),
+    [message.attachments],
+  );
+  const previewUrls = useAssetUrls(ctx.activeThreadEnvironmentId, resources);
+  const urlsById = useMemo(() => {
+    const map = new Map<string, string>();
+    resources.forEach((resource, index) => {
+      const url = previewUrls[index];
+      if (url) map.set(resource.attachmentId, url);
+    });
+    return map;
+  }, [previewUrls, resources]);
+  const images = (message.attachments ?? []).filter(isImageAttachment);
+  const files = (message.attachments ?? []).filter(isFileAttachment);
+  return (
+    <div className="flex w-full justify-center px-1">
+      <div className="w-full max-w-[80%] rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+        <div className="mb-1 flex items-center gap-2 text-[11px] font-medium text-amber-700/90 dark:text-amber-300/90">
+          <StickyNoteIcon className="size-3.5 shrink-0" />
+          <span className="uppercase tracking-wide">Note</span>
+          {message.createdByName ? (
+            <span className="font-normal text-muted-foreground">{message.createdByName}</span>
+          ) : null}
+          <span className="ms-auto font-normal tabular-nums text-muted-foreground/70">
+            {formatDayAwareTimestamp(message.createdAt, ctx.timestampFormat)}
+          </span>
+        </div>
+        {message.text ? (
+          <div className="text-sm whitespace-pre-wrap break-words">{message.text}</div>
+        ) : null}
+        {images.length > 0 ? (
+          <div className="mt-2 grid max-w-[210px] grid-cols-2 gap-2">
+            {images.map((image) => {
+              const url = urlsById.get(image.id);
+              return (
+                <div
+                  key={image.id}
+                  className="aspect-[4/3] overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                >
+                  {url ? (
+                    <img src={url} alt={image.name} className="block size-full object-cover" />
+                  ) : (
+                    <div className="flex h-full items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                      {image.name}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+        {files.length > 0 ? (
+          <div className="mt-2 flex flex-col gap-1">
+            {files.map((file) => (
+              <div key={file.id} className="flex min-w-0 items-center gap-2 text-sm">
+                <PierreEntryIcon pathValue={file.name} kind="file" theme={ctx.resolvedTheme} />
+                <span className="min-w-0 flex-1 truncate">{file.name}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
