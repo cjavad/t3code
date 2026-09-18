@@ -428,7 +428,10 @@ export function makePiAdapterV2(options: PiAdapterV2Options): ProviderAdapterV2S
       }
       const launch = buildPiRpcLaunch({
         launchArgs: resolvedLaunchArgs.args,
-        environment: options.environment,
+        environment: McpProviderSession.withGitExecutionEnvironmentForThread(
+          options.environment,
+          input.threadId,
+        ),
         mcpSession,
         extensionPath,
         runtimeMode: input.runtimePolicy.runtimeMode,

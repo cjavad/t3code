@@ -121,6 +121,19 @@ PR creation from Git actions continue to use the project's environment.
 For Azure DevOps, use the host website to change comments. Bitbucket does not support reopening a
 declined pull request.
 
+### Agent Git identity and `gh`
+
+When a paired client has an identity subject, configure its name, email, signing key, and optional
+GitHub token under **Settings → Source Control → Git identity and signing**. Every agent process for
+that subject receives the same Git author/committer settings and SSH signing configuration. The
+environment is inherited by shell scripts and their child processes, so ordinary commands such as
+`git commit`, `git push`, and `gh pr create` work as they do in a terminal. `gh` uses the subject's
+GitHub token when one is configured; it does not use the server's shared login.
+
+The client label identifies a device. The identity subject identifies a person and should be reused
+on that person's desktop and phone. User-authored messages retain the stable user ID, not a copied
+display name.
+
 ### Mark files as viewed
 
 Tick a file off in the **Code** tab once you have read it and it collapses; the toolbar keeps a

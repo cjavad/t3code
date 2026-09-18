@@ -47,6 +47,7 @@ export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 export interface ThreadManagementProvenance {
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
+  readonly createdByUserId?: string;
 }
 
 export function withCreationProvenance(
@@ -116,6 +117,7 @@ export interface ThreadManagementSendInput {
   readonly mode: ThreadManagementSendMode;
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
+  readonly createdByUserId?: string;
 }
 
 export interface ThreadManagementSendResult {
@@ -573,6 +575,7 @@ const make = Effect.gen(function* () {
         dispatchMode,
         createdBy: input.createdBy,
         creationSource: input.creationSource,
+        ...(input.createdByUserId === undefined ? {} : { createdByUserId: input.createdByUserId }),
       });
       const projection = yield* getProjectThreadRecords(input, ["runs", "messages", "turnItems"], {
         messageIds: [input.messageId],

@@ -1408,6 +1408,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ...(queuedMessage.context ? { context: queuedMessage.context } : {}),
           createdBy: queuedMessage.createdBy,
           creationSource: queuedMessage.creationSource,
+          ...(queuedMessage.createdByUserId === undefined
+            ? {}
+            : { createdByUserId: queuedMessage.createdByUserId }),
           ...(queuedMessage.scheduledTaskId === undefined
             ? {}
             : { scheduledTaskId: queuedMessage.scheduledTaskId }),
@@ -3329,6 +3332,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
     readonly createdBy: OrchestrationV2ConversationMessage["createdBy"];
     readonly creationSource: OrchestrationV2ConversationMessage["creationSource"];
+    readonly createdByUserId?: OrchestrationV2ConversationMessage["createdByUserId"];
     readonly scheduledTaskId?: OrchestrationV2ConversationMessage["scheduledTaskId"];
     readonly senderThreadId?: OrchestrationV2ConversationMessage["senderThreadId"];
     readonly delegatedCompletion?: OrchestrationV2ConversationMessage["delegatedCompletion"];
@@ -3470,6 +3474,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           const message: OrchestrationV2ConversationMessage = {
             createdBy: input.createdBy,
             creationSource: input.creationSource,
+            ...(input.createdByUserId === undefined
+              ? {}
+              : { createdByUserId: input.createdByUserId }),
             ...(input.delegatedCompletion === undefined
               ? {}
               : { delegatedCompletion: input.delegatedCompletion }),
@@ -3492,6 +3499,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           const turnItem: OrchestrationV2TurnItem = {
             createdBy: input.createdBy,
             creationSource: input.creationSource,
+            ...(input.createdByUserId === undefined
+              ? {}
+              : { createdByUserId: input.createdByUserId }),
             ...(input.scheduledTaskId === undefined
               ? {}
               : { scheduledTaskId: input.scheduledTaskId }),
@@ -4326,6 +4336,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               : (projection.runs.find((run) => run.id === dispatchMode.targetRunId)
                   ?.modelSelection ?? modelSelection),
           delegatedCompletion,
+          ...(command.createdByUserId === undefined
+            ? {}
+            : { createdByUserId: command.createdByUserId }),
           targetRunId: dispatchMode.targetRunId,
           messageId: command.messageId,
           text: dispatchText,
@@ -4517,6 +4530,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const message: OrchestrationV2ConversationMessage = {
           createdBy: command.createdBy,
           creationSource: command.creationSource,
+          ...(command.createdByUserId === undefined
+            ? {}
+            : { createdByUserId: command.createdByUserId }),
           ...(command.scheduledTaskId === undefined
             ? {}
             : { scheduledTaskId: command.scheduledTaskId }),
@@ -4856,6 +4872,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const message: OrchestrationV2ConversationMessage = {
           createdBy: command.createdBy,
           creationSource: command.creationSource,
+          ...(command.createdByUserId === undefined
+            ? {}
+            : { createdByUserId: command.createdByUserId }),
           ...(command.scheduledTaskId === undefined
             ? {}
             : { scheduledTaskId: command.scheduledTaskId }),
@@ -4879,6 +4898,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const turnItem: OrchestrationV2TurnItem = {
           createdBy: command.createdBy,
           creationSource: command.creationSource,
+          ...(command.createdByUserId === undefined
+            ? {}
+            : { createdByUserId: command.createdByUserId }),
           ...(command.scheduledTaskId === undefined
             ? {}
             : { scheduledTaskId: command.scheduledTaskId }),
@@ -5548,6 +5570,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const message: OrchestrationV2ConversationMessage = {
         createdBy: command.createdBy,
         creationSource: command.creationSource,
+        ...(command.createdByUserId === undefined
+          ? {}
+          : { createdByUserId: command.createdByUserId }),
         ...(command.scheduledTaskId === undefined
           ? {}
           : { scheduledTaskId: command.scheduledTaskId }),
@@ -5569,6 +5594,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const turnItem: OrchestrationV2TurnItem = {
         createdBy: command.createdBy,
         creationSource: command.creationSource,
+        ...(command.createdByUserId === undefined
+          ? {}
+          : { createdByUserId: command.createdByUserId }),
         ...(command.scheduledTaskId === undefined
           ? {}
           : { scheduledTaskId: command.scheduledTaskId }),
@@ -6855,6 +6883,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(queuedMessage.context ? { context: queuedMessage.context } : {}),
         createdBy: queuedMessage.createdBy,
         creationSource: queuedMessage.creationSource,
+        ...(queuedMessage.createdByUserId === undefined
+          ? {}
+          : { createdByUserId: queuedMessage.createdByUserId }),
         ...(queuedMessage.scheduledTaskId === undefined
           ? {}
           : { scheduledTaskId: queuedMessage.scheduledTaskId }),
