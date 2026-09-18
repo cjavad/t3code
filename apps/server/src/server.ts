@@ -109,6 +109,7 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import * as GitIdentityService from "./auth/GitIdentityService.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import {
   connectHttpApiLayer,
@@ -312,6 +313,12 @@ const GitManagerLayerLive = GitManager.layer.pipe(
   Layer.provideMerge(WorktreeSetupTracker.layer),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
+  Layer.provideMerge(
+    GitIdentityService.layer.pipe(
+      Layer.provide(ServerSecretStore.layer),
+      Layer.provide(VcsProcess.layer),
+    ),
+  ),
   Layer.provideMerge(
     TextGeneration.layer.pipe(Layer.provide(SourceControlProviderRegistryLayerLive)),
   ),

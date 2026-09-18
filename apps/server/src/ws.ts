@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
+import * as Redacted from "effect/Redacted";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
@@ -39,6 +40,7 @@ import {
   type OrchestrationV2Command,
   type GitActionProgressEvent,
   type GitManagerServiceError,
+  GitIdentityError,
   type MessageId,
   type AcpRegistryImportSessionInput,
   type AcpRegistryDeleteSessionInput,
@@ -203,6 +205,7 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import * as GitIdentityService from "./auth/GitIdentityService.ts";
 import { requiredScopeForRpcMethod, requiredScopeForDeviceList } from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
@@ -1135,6 +1138,7 @@ const makeWsRpcLayer = (
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+      const gitIdentity = yield* GitIdentityService.GitIdentityService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -3079,15 +3083,48 @@ const makeWsRpcLayer = (
         [WS_METHODS.gitRunStackedAction]: (input) =>
           observeRpcStream(
             WS_METHODS.gitRunStackedAction,
-            Stream.callback<GitActionProgressEvent, GitManagerServiceError>((queue) =>
-              gitWorkflow
-                .runStackedAction(input, {
-                  actionId: input.actionId,
-                  progressReporter: {
-                    publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
-                  },
-                })
-                .pipe(
+            Stream.callback<GitActionProgressEvent, GitManagerServiceError | GitIdentityError>(
+              (queue) =>
+                Effect.gen(function* () {
+                  const createsCommit =
+                    input.action === "commit" ||
+                    input.action === "commit_push" ||
+                    input.action === "commit_push_pr";
+                  const identity = createsCommit
+                    ? yield* gitIdentity.resolveCommitIdentity(currentSession.subject)
+                    : undefined;
+                  const githubToken =
+                    input.action === "create_pr" || input.action === "commit_push_pr"
+                      ? yield* gitIdentity.resolveGitHubToken(currentSession.subject)
+                      : null;
+                  if (
+                    (input.action === "create_pr" || input.action === "commit_push_pr") &&
+                    githubToken === null
+                  ) {
+                    return yield* new GitIdentityError({
+                      reason: "not_configured",
+                      detail: "Configure a GitHub token before creating a pull request.",
+                    });
+                  }
+                  const action = gitWorkflow.runStackedAction(input, {
+                    actionId: input.actionId,
+                    ...(identity ? { identity } : {}),
+                    progressReporter: {
+                      publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
+                    },
+                  });
+                  return yield* githubToken === null
+                    ? action
+                    : action.pipe(
+                        Effect.provideService(GitHubCli.PinnedGitHubCredential, {
+                          host: "github.com",
+                          token: githubToken,
+                          credentialFingerprint: NodeCrypto.createHash("sha256")
+                            .update(Redacted.value(githubToken), "utf8")
+                            .digest("hex"),
+                        }),
+                      );
+                }).pipe(
                   Effect.matchCauseEffect({
                     onFailure: (cause) => Queue.failCause(queue, cause),
                     onSuccess: (result) =>
@@ -3127,6 +3164,16 @@ const makeWsRpcLayer = (
             gitWorkflow
               .preparePullRequestThread(input)
               .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitIdentityGet]: (_input) =>
+          observeRpcEffect(WS_METHODS.gitIdentityGet, gitIdentity.get(currentSession.subject), {
+            "rpc.aggregate": "git",
+          }),
+        [WS_METHODS.gitIdentityUpdate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitIdentityUpdate,
+            gitIdentity.update(currentSession.subject, input),
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.vcsListRefs]: (input) =>

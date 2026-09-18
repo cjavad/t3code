@@ -21,6 +21,19 @@ export function createSourceControlEnvironmentAtoms<R, E>(
       label: "environment-data:server:source-control-discovery",
       tag: WS_METHODS.serverDiscoverSourceControl,
     }),
+    gitIdentity: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:git:identity",
+      tag: WS_METHODS.gitIdentityGet,
+    }),
+    updateGitIdentity: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:update-identity",
+      tag: WS_METHODS.gitIdentityUpdate,
+      scheduler: commandScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId }) => environmentId,
+      },
+    }),
     repository: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:source-control:repository",
       tag: WS_METHODS.sourceControlLookupRepository,
