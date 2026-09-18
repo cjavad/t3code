@@ -22,6 +22,8 @@ export interface McpProviderSessionConfig {
    * already pointed at the server's daemon; the agent never handles a token.
    */
   readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
+  /** Per-subject Git identity and provider environment inherited by agents. */
+  readonly gitExecutionEnvironment?: Readonly<Record<string, string>>;
 }
 
 /** Provider env with the device variables applied over `base`, or `base` untouched. */
@@ -41,10 +43,51 @@ export function withAgentDeviceEnvironment(
   };
 }
 
+export function withGitExecutionEnvironment(
+  base: NodeJS.ProcessEnv,
+  config: Pick<McpProviderSessionConfig, "gitExecutionEnvironment"> | undefined,
+): NodeJS.ProcessEnv {
+  const extra = config?.gitExecutionEnvironment;
+  return extra === undefined ? base : { ...base, ...extra };
+}
+
+/** Applies the subject-scoped Git environment for a thread to a provider base environment. */
+export function withGitExecutionEnvironmentForThread(
+  base: NodeJS.ProcessEnv,
+  threadId: ThreadId,
+): NodeJS.ProcessEnv {
+  return withGitExecutionEnvironment(base, readMcpProviderSession(threadId));
+}
+
 const sessionsByThread = new Map<ThreadId, McpProviderSessionConfig>();
+const gitEnvironmentByThread = new Map<ThreadId, Readonly<Record<string, string>>>();
 
 export function setMcpProviderSession(config: McpProviderSessionConfig): void {
-  sessionsByThread.set(config.threadId, config);
+  const gitExecutionEnvironment = gitEnvironmentByThread.get(config.threadId);
+  sessionsByThread.set(
+    config.threadId,
+    gitExecutionEnvironment === undefined ? config : { ...config, gitExecutionEnvironment },
+  );
+}
+
+export function setGitExecutionEnvironment(
+  threadId: ThreadId,
+  environment: Readonly<Record<string, string>> | undefined,
+): void {
+  if (environment === undefined) gitEnvironmentByThread.delete(threadId);
+  else gitEnvironmentByThread.set(threadId, environment);
+  const existing = sessionsByThread.get(threadId);
+  if (existing !== undefined) {
+    sessionsByThread.set(
+      threadId,
+      environment === undefined
+        ? (() => {
+            const { gitExecutionEnvironment: _removed, ...rest } = existing;
+            return rest;
+          })()
+        : { ...existing, gitExecutionEnvironment: environment },
+    );
+  }
 }
 
 export function readMcpProviderSession(threadId: ThreadId): McpProviderSessionConfig | undefined {
@@ -57,4 +100,5 @@ export function clearMcpProviderSession(threadId: ThreadId): void {
 
 function clearAllMcpProviderSessions(): void {
   sessionsByThread.clear();
+  gitEnvironmentByThread.clear();
 }
