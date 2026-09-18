@@ -1,9 +1,11 @@
 import { useNavigation } from "@react-navigation/native";
 import { SettingsRow } from "./components/SettingsRow";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
-import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import {
   type ResponseStreamingMode,
+  type EnvironmentId,
   type ServerSettings,
   type ServerSettingsPatch,
   type ThreadEnvMode,
@@ -11,12 +13,14 @@ import {
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectScopedServerSettingKey,
 } from "@t3tools/contracts";
-import { useRef, useState } from "react";
-import { View } from "react-native";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { Alert, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RUNTIME_MODE_CHOICES } from "../threads/thread-settings-options";
 import { serverEnvironment } from "../../state/server";
+import { sourceControlEnvironment } from "../../state/sourceControl";
+import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsScreen } from "./components/SettingsScreen";
 import {
@@ -334,6 +338,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     disabled={disabledFor("branchNamingMode")}
                     onChange={write}
                   />
+                  <MobileGitIdentitySettings environmentId={reference.environment.environmentId} />
                   <SettingsSection title="Default branch">
                     <SettingsSwitchRow
                       icon="arrow.down.circle"
@@ -454,6 +459,89 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
         </ScrollView>
       </SettingsScreen>
     </>
+  );
+}
+
+function MobileGitIdentitySettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const identity = useEnvironmentQuery(
+    sourceControlEnvironment.gitIdentity({ environmentId, input: {} }),
+  );
+  const update = useAtomCommand(sourceControlEnvironment.updateGitIdentity, {
+    label: "git identity update",
+    reportFailure: true,
+  });
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+  const [githubToken, setGithubToken] = useState("");
+  const [saving, setSaving] = useState(false);
+  const profile = identity.data;
+  useEffect(() => {
+    if (profile === null) return;
+    setDisplayName((current) => current || profile.displayName);
+    setEmail((current) => current || profile.email);
+  }, [profile]);
+  const save = async () => {
+    setSaving(true);
+    const result = await update({
+      environmentId,
+      input: {
+        displayName: displayName.trim(),
+        email: email.trim(),
+        ...(githubToken.trim() ? { githubToken: githubToken.trim() } : {}),
+      },
+    });
+    setSaving(false);
+    if (result._tag === "Success") {
+      setGithubToken("");
+      identity.refresh();
+      return;
+    }
+    Alert.alert("Git identity", "Could not save the identity on this server.");
+  };
+  return (
+    <SettingsSection title="Git identity and signing">
+      <View className="gap-3 px-1 py-2">
+        <Text className="text-sm text-foreground-muted">
+          Commits use a per-user SSH signing key. Add the public key shown after saving to GitHub as
+          an SSH signing key.
+        </Text>
+        <TextInput
+          value={displayName}
+          onChangeText={setDisplayName}
+          placeholder={profile?.displayName ?? "Name"}
+        />
+        <TextInput
+          value={email}
+          onChangeText={setEmail}
+          placeholder={profile?.email ?? "Git email"}
+          autoCapitalize="none"
+          keyboardType="email-address"
+        />
+        <TextInput
+          value={githubToken}
+          onChangeText={setGithubToken}
+          placeholder={
+            profile?.githubTokenConfigured
+              ? "GitHub token saved"
+              : "GitHub token for PRs (optional)"
+          }
+          secureTextEntry
+          autoCapitalize="none"
+        />
+        <Pressable
+          disabled={saving || !displayName.trim() || !email.trim()}
+          onPress={() => void save()}
+          className="rounded-lg bg-accent px-4 py-3 disabled:opacity-50"
+        >
+          <Text className="text-center font-t3-medium text-accent-foreground">
+            {saving ? "Saving…" : "Save identity"}
+          </Text>
+        </Pressable>
+        {profile?.signingKey ? (
+          <Text className="text-xs text-foreground-muted">{profile.signingKey}</Text>
+        ) : null}
+      </View>
+    </SettingsSection>
   );
 }
 
