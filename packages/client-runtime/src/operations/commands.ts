@@ -178,6 +178,12 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
   readonly bootstrap?: StartThreadBootstrap;
   readonly sourceProposedPlan?: { readonly threadId: ThreadId; readonly planId: PlanId };
   readonly dispatchMode?: "auto" | "queue" | "steer" | "restart" | "start";
+  /**
+   * `"note"` records a human-only message: it is appended to the transcript and
+   * broadcast to other people in the thread, but it starts no turn and is never
+   * sent to a provider.
+   */
+  readonly mode?: "note";
 }
 
 export interface InterruptThreadTurnInput extends ThreadCommandInput {
@@ -620,6 +626,20 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     input.message.attachments,
     attachments,
   );
+  if (input.mode === "note") {
+    return yield* dispatch({
+      type: "message.dispatch",
+      commandId,
+      createdBy: "user",
+      creationSource: input.creationSource ?? "web",
+      threadId: input.threadId,
+      messageId: input.message.messageId,
+      text: input.message.text,
+      ...(context ? { context } : {}),
+      attachments,
+      dispatchMode: { type: "note" },
+    });
+  }
   const bootstrap = input.bootstrap?.createThread;
   const prepareWorktree = input.bootstrap?.prepareWorktree;
   if (bootstrap !== undefined || prepareWorktree !== undefined) {

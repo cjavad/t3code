@@ -269,6 +269,41 @@ describe("computeMessageDurationStart", () => {
     expect(result).toEqual(new Map([["a1", "2026-01-01T00:00:05Z"]]));
   });
 
+  it("ignores notes when tracking the turn boundary", () => {
+    const result = computeMessageDurationStart([
+      {
+        id: "u1",
+        role: "user",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        streaming: false,
+      },
+      {
+        id: "n1",
+        role: "note",
+        createdAt: "2026-01-01T00:00:05Z",
+        updatedAt: "2026-01-01T00:00:05Z",
+        streaming: false,
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        createdAt: "2026-01-01T00:00:30Z",
+        updatedAt: "2026-01-01T00:00:30Z",
+        streaming: false,
+      },
+    ]);
+
+    // A note is not a turn boundary: the assistant still measures from u1.
+    expect(result).toEqual(
+      new Map([
+        ["u1", "2026-01-01T00:00:00Z"],
+        ["n1", "2026-01-01T00:00:00Z"],
+        ["a1", "2026-01-01T00:00:00Z"],
+      ]),
+    );
+  });
+
   it("uses the user message createdAt for the first assistant response", () => {
     const result = computeMessageDurationStart([
       {

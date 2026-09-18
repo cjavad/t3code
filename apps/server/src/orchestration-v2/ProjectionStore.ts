@@ -1125,9 +1125,11 @@ export function threadShellFromProjection(
         (left, right) =>
           DateTime.toEpochMillis(right.createdAt) - DateTime.toEpochMillis(left.createdAt),
       )[0] ?? null;
+  // Notes are human messages too: they must not retitle or feed the agent, but
+  // they do count as the thread's latest activity.
   const latestUserMessage =
     projection.messages
-      .filter((message) => message.role === "user")
+      .filter((message) => message.role === "user" || message.role === "note")
       .toSorted(
         (left, right) =>
           DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
