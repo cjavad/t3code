@@ -41,7 +41,6 @@ import * as IdAllocator from "./IdAllocator.ts";
 import { makeProviderFailure } from "./ProviderFailure.ts";
 import { randomUuidV4 } from "./RandomUuid.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
-import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 
 export type ThreadLaunchWorkspaceStrategy =
   | { readonly type: "root"; readonly branch?: string | undefined }
@@ -88,7 +87,6 @@ export interface ThreadLaunchInput {
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
   readonly createdByUserId?: string;
-  readonly processEnvironment?: Readonly<Record<string, string>>;
 }
 
 export interface ThreadLaunchResult {
@@ -635,13 +633,6 @@ const make = Effect.gen(function* () {
           (yield* ids.allocate
             .thread({ projectId: input.projectId })
             .pipe(Effect.mapError(mapError(input, "create-thread"))));
-        if (input.processEnvironment !== undefined) {
-          McpProviderSession.setGitExecutionEnvironment(
-            candidateThreadId,
-            input.processEnvironment,
-          );
-        }
-
         if (reusableLaunchReceipt !== undefined) {
           const shell = yield* threads
             .getThreadShell(candidateThreadId)

@@ -22,6 +22,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { ThreadGitIdentityControl } from "./ThreadGitIdentityControl";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 
@@ -191,6 +192,12 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             <div className="flex flex-col">
               {props.isGitRepo ? (
                 <BranchToolbar layout="panel" panelSection="branch" {...branchToolbarProps} />
+              ) : null}
+              {!props.draftId ? (
+                <ThreadGitIdentityControl
+                  environmentId={props.environmentId}
+                  threadId={props.threadId}
+                />
               ) : null}
               {props.activeProjectName ? (
                 <GitActionsControl

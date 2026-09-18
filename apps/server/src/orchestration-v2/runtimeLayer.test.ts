@@ -3014,3 +3014,87 @@ it.layer(SharedApplicationDataPlaneTestLayer)("shared application data plane", (
     }),
   );
 });
+
+it.layer(TestLayer)("thread git identity", (it) => {
+  it.effect("claims a Git identity from the first user message and keeps it", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* OrchestratorV2;
+      const threadId = ThreadId.make("runtime-git-identity");
+      const identityOf = Effect.fnUntraced(function* () {
+        return (yield* orchestrator.getThreadProjection(threadId)).thread.gitIdentity ?? null;
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        createdByUserId: "user:johan",
+        commandId: CommandId.make("runtime-git-identity-create"),
+        threadId,
+        projectId: ProjectId.make("runtime-git-identity-project"),
+        title: "Git identity",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: process.cwd(),
+      });
+      // Creating a thread claims nothing: forks and imported shells must not
+      // inherit an identity from whoever happened to open them.
+      assert.equal(yield* identityOf(), null);
+
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        createdByUserId: "user:johan",
+        commandId: CommandId.make("runtime-git-identity-message"),
+        threadId,
+        messageId: MessageId.make("runtime-git-identity-message"),
+        text: "Start the work.",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+      });
+      const claimed = yield* identityOf();
+      assert.equal(claimed?.userId, "user:johan");
+      assert.equal(claimed?.source, "first_message");
+
+      // A colleague continuing the thread is attributed as its author, but does
+      // not take over what its agents commit as.
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        createdByUserId: "user:javad",
+        commandId: CommandId.make("runtime-git-identity-continue"),
+        threadId,
+        messageId: MessageId.make("runtime-git-identity-continue"),
+        text: "Continuing for you.",
+        attachments: [],
+        dispatchMode: { type: "queue_after_active" },
+      });
+      assert.equal((yield* identityOf())?.userId, "user:johan");
+
+      // An explicit hand-over wins, and records who made it.
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("runtime-git-identity-assign"),
+        threadId,
+        gitIdentityUserId: "user:javad",
+        gitIdentityAssignedByUserId: "user:johan",
+      });
+      const reassigned = yield* identityOf();
+      assert.equal(reassigned?.userId, "user:javad");
+      assert.equal(reassigned?.source, "explicit");
+      assert.equal(reassigned?.assignedByUserId, "user:johan");
+
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("runtime-git-identity-clear"),
+        threadId,
+        gitIdentityUserId: null,
+        gitIdentityAssignedByUserId: "user:johan",
+      });
+      assert.equal(yield* identityOf(), null);
+    }),
+  );
+});
