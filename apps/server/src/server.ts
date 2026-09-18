@@ -112,6 +112,7 @@ import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as GitIdentityService from "./auth/GitIdentityService.ts";
 import * as ThreadGitEnvironmentService from "./auth/ThreadGitEnvironmentService.ts";
 import * as AuthUsers from "./persistence/AuthUsers.ts";
+import * as CloudDevices from "./persistence/CloudDevices.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import {
   connectHttpApiLayer,
@@ -248,6 +249,7 @@ const PlatformServicesLive = NodeServices.layer;
 const PersistenceLayerLive = Layer.empty.pipe(
   Layer.provideMerge(SqlitePersistenceLayerLive),
   Layer.provideMerge(AuthUsers.layer),
+  Layer.provideMerge(CloudDevices.layer),
 );
 
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(

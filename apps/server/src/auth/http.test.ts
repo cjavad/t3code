@@ -19,6 +19,8 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
+import * as AuthUsers from "../persistence/AuthUsers.ts";
+import * as CloudDevices from "../persistence/CloudDevices.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./http.ts";
 
 const DEV_TOKEN = "reusable-dev-auth-token-that-is-long-enough";
@@ -45,6 +47,11 @@ const environmentAuthLayer = EnvironmentAuth.layer.pipe(
 );
 const routesLayer = HttpApiBuilder.layer(AuthTestApi).pipe(
   Layer.provide(authHttpApiLayer),
+  Layer.provide(
+    Layer.mergeAll(CloudDevices.layer, AuthUsers.layer).pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    ),
+  ),
   Layer.provide(environmentAuthenticatedAuthLayer),
   Layer.provideMerge(environmentAuthLayer),
   Layer.provide(configLayer),

@@ -17,6 +17,7 @@ import {
 import { EnvironmentId } from "@t3tools/contracts";
 import { RelayClientTracer } from "@t3tools/shared/relayTracing";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as CloudDevices from "../persistence/CloudDevices.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfigModule from "../config.ts";
 import { writeServiceState } from "../serviceLauncher.ts";
@@ -187,7 +188,14 @@ describe("relay request tracing", () => {
 describe("reconcileDesiredCloudLink", () => {
   it.effect("requires stored CLI authorization without exposing an HTTP endpoint", () =>
     Effect.gen(function* () {
-      const error = yield* Effect.flip(reconcileDesiredCloudLink("http://127.0.0.1:3774"));
+      const error = yield* Effect.flip(reconcileDesiredCloudLink("http://127.0.0.1:3774")).pipe(
+        Effect.provideService(
+          CloudDevices.CloudDeviceRepository,
+          CloudDevices.CloudDeviceRepository.of(
+            {} as CloudDevices.CloudDeviceRepository["Service"],
+          ),
+        ),
+      );
 
       expect(error).toMatchObject({
         _tag: "EnvironmentHttpUnauthorizedError",
@@ -312,6 +320,14 @@ describe("releaseManagedTunnelOnShutdown", () => {
         Effect.provideService(
           EnvironmentAuth.EnvironmentAuth,
           EnvironmentAuth.EnvironmentAuth.of({} as EnvironmentAuth.EnvironmentAuth["Service"]),
+        ),
+        // The release path never mints a connect credential, so the device
+        // registry it would consult is never touched.
+        Effect.provideService(
+          CloudDevices.CloudDeviceRepository,
+          CloudDevices.CloudDeviceRepository.of(
+            {} as CloudDevices.CloudDeviceRepository["Service"],
+          ),
         ),
         Effect.provideService(
           CliTokenManager.CloudCliTokenManager,
