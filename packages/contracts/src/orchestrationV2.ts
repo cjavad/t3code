@@ -83,6 +83,8 @@ export type OrchestrationV2ThreadHistoryOrigin = typeof OrchestrationV2ThreadHis
 const OrchestrationV2CreationFields = {
   createdBy: OrchestrationV2Actor,
   creationSource: OrchestrationV2CreationSource,
+  /** Stable user entity responsible for a user-created record. */
+  createdByUserId: Schema.optional(TrimmedNonEmptyString),
 } as const;
 
 export const OrchestrationV2NativeRefStrength = Schema.Literals(["strong", "weak", "none"]);

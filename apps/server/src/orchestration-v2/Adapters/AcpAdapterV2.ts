@@ -642,12 +642,15 @@ function acpMcpContext(threadId: ThreadId | null): AcpMcpContext {
     acpServers: [{ type: "acp", name: "t3-code", serverId: "t3-code" }],
     endpoint: session.endpoint,
     authorization: session.authorizationHeader,
-    processEnvironment: {
-      T3_ACP_MCP_ENDPOINT: session.endpoint,
-      T3_ACP_MCP_AUTHORIZATION: session.authorizationHeader,
-      T3_ACP_MCP_NODE: process.execPath,
-      T3_ACP_MCP_ENTRYPOINT: serverEntrypoint,
-    },
+    processEnvironment: McpProviderSession.withGitExecutionEnvironment(
+      {
+        T3_ACP_MCP_ENDPOINT: session.endpoint,
+        T3_ACP_MCP_AUTHORIZATION: session.authorizationHeader,
+        T3_ACP_MCP_NODE: process.execPath,
+        T3_ACP_MCP_ENTRYPOINT: serverEntrypoint,
+      },
+      session,
+    ),
   };
 }
 
