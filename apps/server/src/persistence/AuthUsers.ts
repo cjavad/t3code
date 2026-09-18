@@ -31,6 +31,9 @@ export class AuthUserRepository extends Context.Service<
     readonly getBySubject: (
       subject: string,
     ) => Effect.Effect<AuthUserRecord | null, PersistenceSqlError>;
+    readonly getById: (id: string) => Effect.Effect<AuthUserRecord | null, PersistenceSqlError>;
+    /** Everyone who has ever signed in, for pickers that assign work to a user. */
+    readonly list: () => Effect.Effect<ReadonlyArray<AuthUserRecord>, PersistenceSqlError>;
   }
 >()("t3/persistence/AuthUsers/AuthUserRepository") {}
 
@@ -57,6 +60,28 @@ export const make = Effect.gen(function* () {
              updated_at AS "updatedAt"
       FROM auth_users
       WHERE subject = ${requestedSubject}
+    `,
+  });
+
+  const readByIdRow = SqlSchema.findOneOption({
+    Request: Schema.Struct({ id: Schema.String }),
+    Result: RawAuthUserRecord,
+    execute: ({ id: requestedId }) => sql`
+      SELECT id, subject, display_name AS "displayName", created_at AS "createdAt",
+             updated_at AS "updatedAt"
+      FROM auth_users
+      WHERE id = ${requestedId}
+    `,
+  });
+
+  const readAllRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: RawAuthUserRecord,
+    execute: () => sql`
+      SELECT id, subject, display_name AS "displayName", created_at AS "createdAt",
+             updated_at AS "updatedAt"
+      FROM auth_users
+      ORDER BY display_name COLLATE NOCASE
     `,
   });
 
@@ -93,7 +118,24 @@ export const make = Effect.gen(function* () {
 
   const getBySubject: AuthUserRepository["Service"]["getBySubject"] = readBySubject;
 
-  return AuthUserRepository.of({ ensureForSubject, getBySubject });
+  const getById: AuthUserRepository["Service"]["getById"] = (id) =>
+    readByIdRow({ id }).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.succeed(null),
+          onSome: (row) => decodeAuthUser(row),
+        }),
+      ),
+      Effect.mapError(toPersistenceSqlError("AuthUserRepository.getById:query")),
+    );
+
+  const list: AuthUserRepository["Service"]["list"] = () =>
+    readAllRows(undefined).pipe(
+      Effect.flatMap(Effect.forEach((row) => decodeAuthUser(row))),
+      Effect.mapError(toPersistenceSqlError("AuthUserRepository.list:query")),
+    );
+
+  return AuthUserRepository.of({ ensureForSubject, getBySubject, getById, list });
 });
 
 export const layer = Layer.effect(AuthUserRepository, make);
