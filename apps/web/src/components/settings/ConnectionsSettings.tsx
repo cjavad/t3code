@@ -762,6 +762,8 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
             <h3 className="text-sm font-medium text-foreground">{primaryLabel}</h3>
           </div>
           <p className="text-xs text-muted-foreground">
+            Identity: <code className="font-mono text-[11px]">{pairingLink.subject}</code>
+            <span aria-hidden> · </span>
             <Tooltip>
               <TooltipTrigger render={<span />}>
                 {formatExpiresInLabel(pairingLink.expiresAt, nowMs)}
@@ -1021,6 +1023,8 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
             ) : null}
           </div>
           <p className="text-xs text-muted-foreground">
+            Identity: <code className="font-mono text-[11px]">{clientSession.subject}</code>
+            <span aria-hidden> · </span>
             {deviceInfoBits.length > 0 ? (
               <>
                 {deviceInfoBits.join(" · ")}
@@ -1062,6 +1066,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
 }: AuthorizedClientsHeaderActionProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [pairingLabel, setPairingLabel] = useState("");
+  const [pairingSubject, setPairingSubject] = useState("");
   const [pairingScopes, setPairingScopes] = useState<ReadonlyArray<AuthEnvironmentScope>>([
     ...AuthStandardClientScopes,
   ]);
@@ -1072,10 +1077,12 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
     try {
       const created = await createServerPairingCredential({
         label: pairingLabel,
+        subject: pairingSubject,
         scopes: pairingScopes,
       });
       onPairingLinkCreated(created);
       setPairingLabel("");
+      setPairingSubject("");
       setPairingScopes([...AuthStandardClientScopes]);
       setDialogOpen(false);
     } catch (error) {
@@ -1090,7 +1097,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
     } finally {
       setIsCreatingPairingLink(false);
     }
-  }, [onPairingLinkCreated, pairingLabel, pairingScopes]);
+  }, [onPairingLinkCreated, pairingLabel, pairingScopes, pairingSubject]);
 
   const togglePairingScope = useCallback((scope: AuthEnvironmentScope, checked: boolean) => {
     setPairingScopes((current) =>
@@ -1116,6 +1123,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
           setDialogOpen(open);
           if (!open) {
             setPairingLabel("");
+            setPairingSubject("");
             setPairingScopes([...AuthStandardClientScopes]);
           }
         }}
@@ -1148,6 +1156,21 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
                 disabled={isCreatingPairingLink}
                 autoFocus
               />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-foreground">
+                Identity subject
+              </span>
+              <Input
+                value={pairingSubject}
+                onChange={(event) => setPairingSubject(event.target.value)}
+                placeholder="e.g. johan"
+                disabled={isCreatingPairingLink}
+              />
+              <span className="mt-1 block text-[11px] text-muted-foreground">
+                Reuse this subject across one person&apos;s devices to share Git identity and
+                signing settings.
+              </span>
             </label>
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
