@@ -78,6 +78,7 @@ export interface GitActionProgressReporter {
 export interface GitRunStackedActionOptions {
   readonly actionId?: string;
   readonly progressReporter?: GitActionProgressReporter;
+  readonly identity?: GitVcsDriver.GitCommitOptions["identity"];
 }
 
 export interface GitRemoteStatusOptions extends GitVcsDriver.GitRemoteStatusOptions {
@@ -1866,6 +1867,7 @@ export const make = Effect.gen(function* () {
     filePaths?: readonly string[],
     progressReporter?: GitActionProgressReporter,
     actionId?: string,
+    identity?: GitRunStackedActionOptions["identity"],
   ) {
     const emit = (event: GitActionProgressPayload) =>
       progressReporter && actionId
@@ -1951,6 +1953,7 @@ export const make = Effect.gen(function* () {
         : null;
     const { commitSha } = yield* gitCore.commit(cwd, suggestion.subject, suggestion.body, {
       timeoutMs: COMMIT_TIMEOUT_MS,
+      ...(identity ? { identity } : {}),
       ...(commitProgress ? { progress: commitProgress } : {}),
     });
     if (currentHookName !== null) {
@@ -2733,6 +2736,7 @@ export const make = Effect.gen(function* () {
                   input.filePaths,
                   options?.progressReporter,
                   progress.actionId,
+                  options?.identity,
                 ),
               ),
             )

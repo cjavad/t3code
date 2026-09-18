@@ -2033,7 +2033,23 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     body,
     options?: GitVcsDriver.GitCommitOptions,
   ) {
-    const args = ["commit", "-m", subject];
+    const args = options?.identity
+      ? [
+          "-c",
+          `user.name=${options.identity.displayName}`,
+          "-c",
+          `user.email=${options.identity.email}`,
+          "-c",
+          "commit.gpgsign=true",
+          "-c",
+          "gpg.format=ssh",
+          "-c",
+          `user.signingKey=${options.identity.signingKeyPath}`,
+          "commit",
+          "-m",
+          subject,
+        ]
+      : ["commit", "-m", subject];
     const trimmedBody = body.trim();
     if (trimmedBody.length > 0) {
       args.push("-m", trimmedBody);
