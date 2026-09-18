@@ -151,6 +151,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.gitRunStackedAction]: AuthOrchestrationOperateScope,
   [WS_METHODS.gitIdentityGet]: AuthOrchestrationReadScope,
   [WS_METHODS.gitIdentityUpdate]: AuthOrchestrationOperateScope,
+  // Display names only, and only for accounts that already appear as message
+  // authors in shared threads; assigning one still needs access management.
+  [WS_METHODS.gitIdentityUsers]: AuthOrchestrationReadScope,
   [WS_METHODS.gitResolvePullRequest]: AuthOrchestrationOperateScope,
   [WS_METHODS.gitPreparePullRequestThread]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsListRefs]: AuthOrchestrationReadScope,
