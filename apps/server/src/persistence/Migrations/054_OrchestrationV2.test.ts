@@ -13,7 +13,9 @@ layer("054_OrchestrationV2", (it) => {
     Effect.sync(() => {
       assert.deepStrictEqual(
         migrationEntries.map(([id]) => id),
-        Array.from({ length: 54 }, (_, index) => index + 1),
+        // Fork migrations sit above the upstream released range, leaving 55-62
+        // free for upstream V2 churn (see Migrations.ts).
+        [...Array.from({ length: 54 }, (_, index) => index + 1), 63, 64],
       );
     }),
   );
@@ -24,7 +26,11 @@ layer("054_OrchestrationV2", (it) => {
       yield* runMigrations({ toMigrationInclusive: 53 });
 
       const executed = yield* runMigrations();
-      assert.deepStrictEqual(executed, [[54, "OrchestrationV2"]]);
+      assert.deepStrictEqual(executed, [
+        [54, "OrchestrationV2"],
+        [63, "AuthUsers"],
+        [64, "AuthCloudDevices"],
+      ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
       const migrations = yield* sql<{
@@ -44,6 +50,8 @@ layer("054_OrchestrationV2", (it) => {
         { migration_id: 52, name: "ProjectionThreadTitleState" },
         { migration_id: 53, name: "PullRequestFilesViewed" },
         { migration_id: 54, name: "OrchestrationV2" },
+        { migration_id: 63, name: "AuthUsers" },
+        { migration_id: 64, name: "AuthCloudDevices" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`

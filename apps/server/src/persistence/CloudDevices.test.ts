@@ -7,7 +7,9 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { CloudDeviceRepository, layer as cloudDevicesLayer } from "./CloudDevices.ts";
 import { runMigrations } from "./Migrations.ts";
 
-const testLayer = cloudDevicesLayer.pipe(Layer.provideMerge(NodeSqliteClient.layerMemory()));
+const testLayer = cloudDevicesLayer.pipe(
+  Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+);
 
 it.layer(testLayer)("CloudDeviceRepository", (it) => {
   it.effect("remembers a device, and only claims one that has connected", () =>
