@@ -655,8 +655,8 @@ function acpMcpContext(threadId: ThreadId | null, self: SelfInvocation): AcpMcpC
       {
         T3_ACP_MCP_ENDPOINT: session.endpoint,
         T3_ACP_MCP_AUTHORIZATION: session.authorizationHeader,
-        T3_ACP_MCP_NODE: process.execPath,
-        T3_ACP_MCP_ENTRYPOINT: serverEntrypoint,
+        T3_ACP_MCP_NODE: self.command,
+        ...(self.entrypoint === undefined ? {} : { T3_ACP_MCP_ENTRYPOINT: self.entrypoint }),
       },
       session,
     ),

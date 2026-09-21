@@ -8,7 +8,9 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { AuthUserRepository, layer as authUsersLayer } from "./AuthUsers.ts";
 import { runMigrations } from "./Migrations.ts";
 
-const testLayer = authUsersLayer.pipe(Layer.provideMerge(NodeSqliteClient.layerMemory()));
+const testLayer = authUsersLayer.pipe(
+  Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+);
 
 it.layer(testLayer)("AuthUserRepository", (it) => {
   it.effect("creates one stable user row for a subject", () =>
