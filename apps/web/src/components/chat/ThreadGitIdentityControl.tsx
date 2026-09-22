@@ -22,6 +22,23 @@ import {
 } from "./threadDetailsPanelStyles";
 
 /**
+ * A user's GitHub avatar, keyed by username. GitHub serves it at
+ * `github.com/<username>.png`; no API call or token is involved.
+ */
+function GitHubAvatar(props: { readonly username: string; readonly className: string }) {
+  return (
+    <img
+      src={`https://github.com/${encodeURIComponent(props.username)}.png?size=80`}
+      alt=""
+      aria-hidden="true"
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      className={props.className}
+    />
+  );
+}
+
+/**
  * Which user this thread's agents commit as.
  *
  * The thread claims an identity from its first user message and keeps it, so a
@@ -96,7 +113,14 @@ export function ThreadGitIdentityControl(props: {
             />
           }
         >
-          <UserRoundIcon aria-hidden="true" className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+          {assigned?.githubUsername ? (
+            <GitHubAvatar
+              username={assigned.githubUsername}
+              className="-mx-0.5 size-4 shrink-0 rounded-full bg-muted object-cover"
+            />
+          ) : (
+            <UserRoundIcon aria-hidden="true" className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+          )}
           <span className="min-w-0 flex-1 truncate text-left">Commits as {label}</span>
           <ChevronDownIcon aria-hidden="true" className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />
         </MenuTrigger>
@@ -106,8 +130,23 @@ export function ThreadGitIdentityControl(props: {
           ) : (
             candidates.map((candidate) => (
               <MenuItem key={candidate.userId} onClick={() => void assign(candidate.userId)}>
-                {candidate.displayName}
-                {candidate.identityConfigured ? "" : " — no Git identity"}
+                <span className="flex min-w-0 items-center gap-2">
+                  {candidate.githubUsername ? (
+                    <GitHubAvatar
+                      username={candidate.githubUsername}
+                      className="size-5 shrink-0 rounded-full bg-muted object-cover"
+                    />
+                  ) : (
+                    <UserRoundIcon
+                      aria-hidden="true"
+                      className="size-5 shrink-0 text-muted-foreground"
+                    />
+                  )}
+                  <span className="min-w-0 truncate">
+                    {candidate.displayName}
+                    {candidate.identityConfigured ? "" : " — no Git identity"}
+                  </span>
+                </span>
               </MenuItem>
             ))
           )}

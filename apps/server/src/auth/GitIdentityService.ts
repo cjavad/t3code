@@ -48,6 +48,10 @@ const subjectKey = (subject: string): string =>
 
 const isValidEmail = (email: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email.trim());
 
+const normalizeGitHubUsername = (username: string): string => username.trim().replace(/^@/u, "");
+
+const isValidGitHubUsername = (username: string): boolean => /^[A-Za-z0-9-]{1,39}$/u.test(username);
+
 export const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -83,6 +87,7 @@ export const make = Effect.gen(function* () {
         if (
           typeof parsed.displayName !== "string" ||
           typeof parsed.email !== "string" ||
+          typeof parsed.githubUsername !== "string" ||
           typeof parsed.signingKey !== "string" ||
           typeof parsed.githubTokenConfigured !== "boolean"
         ) {
@@ -180,6 +185,13 @@ export const make = Effect.gen(function* () {
           detail: "Enter a valid Git email address.",
         });
       }
+      const githubUsername = normalizeGitHubUsername(input.githubUsername);
+      if (!isValidGitHubUsername(githubUsername)) {
+        return yield* new GitIdentityError({
+          reason: "invalid_github_username",
+          detail: "Enter a valid GitHub username.",
+        });
+      }
       const existing = yield* readProfile(subject);
       if (input.githubToken === null) {
         yield* secrets.remove(names(subject).githubToken).pipe(Effect.ignore);
@@ -216,6 +228,7 @@ export const make = Effect.gen(function* () {
       const profile: GitIdentityProfile = {
         displayName,
         email,
+        githubUsername,
         signingKey,
         githubTokenConfigured,
       };
