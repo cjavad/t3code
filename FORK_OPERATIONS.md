@@ -88,6 +88,44 @@ Deployment clones this branch from GitHub, so the commit must be pushed first.
 image), so never run it just to check status. **Never deploy without explicit
 approval.**
 
+## Android preview APK (local build)
+
+EAS cloud builds run under pingdotgg's Expo project, which we don't control, so
+the APK is built locally.
+
+Enable T3 Connect with a repo-root `.env` (gitignored, public values):
+
+```sh
+T3CODE_CLERK_PUBLISHABLE_KEY=pk_live_Y2xlcmsudDMuY29kZXMk
+T3CODE_CLERK_JWT_TEMPLATE=t3-relay
+T3CODE_RELAY_URL=https://relay.t3.codes
+T3CODE_MOBILE_UPDATES_ENABLED=0   # sideloaded: no EAS update channel
+```
+
+Without these the app falls back to `http://relay.invalid` and Connect is off.
+
+Toolchain (once): JDK 17 + Android SDK at `/root/android-sdk` with
+`platform-tools`, `platforms;android-36`, `build-tools;36.0.0`,
+`ndk;27.1.12297006`, `cmake;3.22.1` — versions pinned by
+`node_modules/react-native/gradle/libs.versions.toml`.
+
+```sh
+export PATH="$HOME/.local/share/vite-plus/bin:$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"
+export ANDROID_HOME=/root/android-sdk ANDROID_SDK_ROOT=/root/android-sdk
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 APP_VARIANT=preview EXPO_NO_GIT_STATUS=1
+cd apps/mobile
+node_modules/.bin/expo prebuild --clean --platform android
+cd android && ./gradlew assembleRelease
+```
+
+Output: `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`
+(package `com.t3tools.t3code.preview`, "T3 Code Preview", debug-signed, ~186 MB,
+all four ABIs). First build ~15 min and ~15 GB; `apps/mobile/android/` and
+`~/.gradle` are regenerable.
+
+Gaps: no `google-services.json`, so push/FCM won't deliver, and Google sign-in
+client IDs are unset. Neither affects T3 Connect.
+
 ## Toolchain
 
 Everything on `jbox` runs through `/root/t3dev <cmd>` (cds into the deploy
