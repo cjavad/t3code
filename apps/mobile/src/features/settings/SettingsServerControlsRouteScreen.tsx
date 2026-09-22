@@ -472,6 +472,7 @@ function MobileGitIdentitySettings({ environmentId }: { readonly environmentId: 
   });
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
+  const [githubUsername, setGithubUsername] = useState("");
   const [githubToken, setGithubToken] = useState("");
   const [saving, setSaving] = useState(false);
   const profile = identity.data;
@@ -479,6 +480,7 @@ function MobileGitIdentitySettings({ environmentId }: { readonly environmentId: 
     if (profile === null) return;
     setDisplayName((current) => current || profile.displayName);
     setEmail((current) => current || profile.email);
+    setGithubUsername((current) => current || profile.githubUsername);
   }, [profile]);
   const save = async () => {
     setSaving(true);
@@ -487,6 +489,7 @@ function MobileGitIdentitySettings({ environmentId }: { readonly environmentId: 
       input: {
         displayName: displayName.trim(),
         email: email.trim(),
+        githubUsername: githubUsername.trim(),
         ...(githubToken.trim() ? { githubToken: githubToken.trim() } : {}),
       },
     });
@@ -518,6 +521,13 @@ function MobileGitIdentitySettings({ environmentId }: { readonly environmentId: 
           keyboardType="email-address"
         />
         <TextInput
+          value={githubUsername}
+          onChangeText={setGithubUsername}
+          placeholder={profile?.githubUsername ?? "GitHub username"}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <TextInput
           value={githubToken}
           onChangeText={setGithubToken}
           placeholder={
@@ -529,7 +539,7 @@ function MobileGitIdentitySettings({ environmentId }: { readonly environmentId: 
           autoCapitalize="none"
         />
         <Pressable
-          disabled={saving || !displayName.trim() || !email.trim()}
+          disabled={saving || !displayName.trim() || !email.trim() || !githubUsername.trim()}
           onPress={() => void save()}
           className="rounded-lg bg-accent px-4 py-3 disabled:opacity-50"
         >

@@ -512,6 +512,7 @@ function GitIdentitySettings({ environmentId }: { readonly environmentId: Enviro
   });
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
+  const [githubUsername, setGithubUsername] = useState("");
   const [githubToken, setGithubToken] = useState("");
   const [initialized, setInitialized] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -519,6 +520,7 @@ function GitIdentitySettings({ environmentId }: { readonly environmentId: Enviro
     if (initialized || identity.data === null) return;
     setDisplayName(identity.data?.displayName ?? "");
     setEmail(identity.data?.email ?? "");
+    setGithubUsername(identity.data?.githubUsername ?? "");
     setInitialized(true);
   }, [identity.data, initialized]);
 
@@ -530,6 +532,7 @@ function GitIdentitySettings({ environmentId }: { readonly environmentId: Enviro
         input: {
           displayName,
           email,
+          githubUsername,
           ...(githubToken.trim() ? { githubToken: githubToken.trim() } : {}),
         },
       });
@@ -570,6 +573,14 @@ function GitIdentitySettings({ environmentId }: { readonly environmentId: Enviro
           />
         </div>
         <Input
+          value={githubUsername}
+          onChange={(event) => setGithubUsername(event.target.value)}
+          placeholder="GitHub username"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+        />
+        <Input
           value={githubToken}
           onChange={(event) => setGithubToken(event.target.value)}
           placeholder={
@@ -584,7 +595,11 @@ function GitIdentitySettings({ environmentId }: { readonly environmentId: Enviro
             {identity.data.signingKey}
           </pre>
         ) : null}
-        <Button size="sm" onClick={save} disabled={saving || !displayName.trim() || !email.trim()}>
+        <Button
+          size="sm"
+          onClick={save}
+          disabled={saving || !displayName.trim() || !email.trim() || !githubUsername.trim()}
+        >
           {saving ? "Saving…" : "Save identity"}
         </Button>
       </div>

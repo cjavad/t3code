@@ -3362,6 +3362,7 @@ const makeWsRpcLayer = (
                   Effect.map((profile) => ({
                     userId: user.id,
                     displayName: user.displayName,
+                    githubUsername: profile?.githubUsername ?? null,
                     identityConfigured: profile !== null,
                   })),
                 ),
