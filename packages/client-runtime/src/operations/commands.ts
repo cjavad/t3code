@@ -130,6 +130,8 @@ export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly regenerateTitle?: boolean;
   /** Link (object) or unlink (null) a pull request (#8160). */
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
+  /** Assign (user id) or clear (null) the Git identity the thread's agents commit as. */
+  readonly gitIdentityUserId?: string | null;
 }
 
 export interface SetThreadRuntimeModeInput extends ThreadCommandInput {
@@ -547,7 +549,8 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.worktreePath !== undefined ||
       input.regenerateTitle !== undefined ||
       input.linkedPullRequest !== undefined ||
-      input.limitRecovery !== undefined
+      input.limitRecovery !== undefined ||
+      input.gitIdentityUserId !== undefined
     ) {
       result = yield* dispatch({
         type: "thread.metadata.update",
@@ -561,6 +564,9 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
         ...(input.linkedPullRequest === undefined
           ? {}
           : { linkedPullRequest: input.linkedPullRequest }),
+        ...(input.gitIdentityUserId === undefined
+          ? {}
+          : { gitIdentityUserId: input.gitIdentityUserId }),
       });
     }
     if (input.modelSelection !== undefined) {

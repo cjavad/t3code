@@ -1241,6 +1241,9 @@ export function threadShellFromProjection(
     ...(projection.thread.branchPullRequest === undefined
       ? {}
       : { branchPullRequest: projection.thread.branchPullRequest }),
+    ...(projection.thread.gitIdentity === undefined
+      ? {}
+      : { gitIdentity: projection.thread.gitIdentity }),
     ...(projection.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: projection.thread.activeOrderKey }),
@@ -1471,6 +1474,9 @@ function shellFromState(input: {
     ...(input.state.thread.branchPullRequest === undefined
       ? {}
       : { branchPullRequest: input.state.thread.branchPullRequest }),
+    ...(input.state.thread.gitIdentity === undefined
+      ? {}
+      : { gitIdentity: input.state.thread.gitIdentity }),
     ...(input.state.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: input.state.thread.activeOrderKey }),

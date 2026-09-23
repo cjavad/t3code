@@ -25,6 +25,11 @@ export function createSourceControlEnvironmentAtoms<R, E>(
       label: "environment-data:git:identity",
       tag: WS_METHODS.gitIdentityGet,
     }),
+    /** Users a thread's Git identity can be assigned to. */
+    gitIdentityUsers: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:git:identity-users",
+      tag: WS_METHODS.gitIdentityUsers,
+    }),
     updateGitIdentity: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:git:update-identity",
       tag: WS_METHODS.gitIdentityUpdate,

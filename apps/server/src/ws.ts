@@ -40,6 +40,7 @@ import {
   type OrchestrationV2Command,
   type GitActionProgressEvent,
   type GitManagerServiceError,
+  AuthAccessWriteScope,
   GitIdentityError,
   type MessageId,
   type AcpRegistryImportSessionInput,
@@ -206,6 +207,9 @@ import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as GitIdentityService from "./auth/GitIdentityService.ts";
+import * as AuthUsers from "./persistence/AuthUsers.ts";
+import { makeGitExecutionEnvironment } from "./auth/GitExecutionEnvironment.ts";
+import * as McpProviderSession from "./mcp/McpProviderSession.ts";
 import { requiredScopeForRpcMethod, requiredScopeForDeviceList } from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
@@ -1073,6 +1077,11 @@ const makeWsRpcLayer = (
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
+      const authUsers = yield* AuthUsers.AuthUserRepository;
+      const currentUser = yield* authUsers.ensureForSubject({
+        subject: currentSession.subject,
+        now: DateTime.formatIso(yield* DateTime.now),
+      });
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
       const intakeContext = yield* Effect.context<
@@ -1139,6 +1148,7 @@ const makeWsRpcLayer = (
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const gitIdentity = yield* GitIdentityService.GitIdentityService;
+      const config = yield* ServerConfig.ServerConfig;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -1153,7 +1163,6 @@ const makeWsRpcLayer = (
       const providerAuth = yield* ProviderAuthService;
       const providerInstallation = yield* makeProviderInstallation();
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
-      const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -1377,6 +1386,7 @@ const makeWsRpcLayer = (
                   },
                   createdBy: "user",
                   creationSource: "web",
+                  createdByUserId: currentUser.id,
                 }),
               ),
             );
@@ -1728,29 +1738,53 @@ const makeWsRpcLayer = (
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
-            startup
-              .enqueueCommand(
-                ThreadMessageIntake.dispatchCommand(
-                  ThreadManagementService.withCreationProvenance(command, {
-                    createdBy: "user",
-                    creationSource: "creationSource" in command ? command.creationSource : "web",
+            Effect.gen(function* () {
+              // Assigning a thread to somebody else hands their signing key and
+              // GitHub token to every agent that runs in it, so it takes the
+              // same scope that gates pairing and session management. Assigning
+              // yourself never does.
+              if (
+                command.type === "thread.metadata.update" &&
+                command.gitIdentityUserId != null &&
+                command.gitIdentityUserId !== currentUser.id &&
+                !currentSession.scopes.includes(AuthAccessWriteScope)
+              ) {
+                return yield* new OrchestrationV2DispatchCommandError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  message:
+                    "Assigning a thread to another user's Git identity requires access management permission.",
+                });
+              }
+              const provenanced =
+                command.type === "thread.metadata.update" && command.gitIdentityUserId !== undefined
+                  ? { ...command, gitIdentityAssignedByUserId: currentUser.id }
+                  : command;
+              return yield* startup
+                .enqueueCommand(
+                  ThreadMessageIntake.dispatchCommand(
+                    ThreadManagementService.withCreationProvenance(provenanced, {
+                      createdBy: "user",
+                      creationSource: "creationSource" in command ? command.creationSource : "web",
+                      createdByUserId: currentUser.id,
+                    }),
+                  ).pipe(Effect.provide(intakeContext)),
+                )
+                .pipe(
+                  Effect.tap(() => recordClientCommandAnalytics(command)),
+                  Effect.map((result) => ({ sequence: result.sequence })),
+                  Effect.mapError((cause) => {
+                    const detail = userFacingDispatchErrorMessage(cause);
+                    return new OrchestrationV2DispatchCommandError({
+                      commandId: command.commandId,
+                      commandType: command.type,
+                      message: detail ?? "Failed to dispatch orchestration V2 command",
+                      ...(detail === undefined ? {} : { detail }),
+                      cause,
+                    });
                   }),
-                ).pipe(Effect.provide(intakeContext)),
-              )
-              .pipe(
-                Effect.tap(() => recordClientCommandAnalytics(command)),
-                Effect.map((result) => ({ sequence: result.sequence })),
-                Effect.mapError((cause) => {
-                  const detail = userFacingDispatchErrorMessage(cause);
-                  return new OrchestrationV2DispatchCommandError({
-                    commandId: command.commandId,
-                    commandType: command.type,
-                    message: detail ?? "Failed to dispatch orchestration V2 command",
-                    ...(detail === undefined ? {} : { detail }),
-                    cause,
-                  });
-                }),
-              ),
+                );
+            }),
             {
               "rpc.aggregate": "orchestrationV2",
               "orchestration_v2.command_id": command.commandId,
@@ -1892,6 +1926,7 @@ const makeWsRpcLayer = (
                       }),
                   createdBy: "user",
                   creationSource: input.creationSource ?? "web",
+                  createdByUserId: currentUser.id,
                 }).pipe(Effect.provide(intakeContext)),
               )
               .pipe(
@@ -3174,6 +3209,35 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.gitIdentityUpdate,
             gitIdentity.update(currentSession.subject, input),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitIdentityUsers]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.gitIdentityUsers,
+            Effect.gen(function* () {
+              const users = yield* authUsers.list().pipe(
+                Effect.catch((cause) =>
+                  Effect.logError("auth users could not be listed", { cause }).pipe(
+                    Effect.andThen(
+                      new GitIdentityError({
+                        reason: "storage",
+                        detail: "The list of users could not be read.",
+                      }),
+                    ),
+                  ),
+                ),
+              );
+              return yield* Effect.forEach(users, (user) =>
+                gitIdentity.get(user.subject).pipe(
+                  Effect.orElseSucceed(() => null),
+                  Effect.map((profile) => ({
+                    userId: user.id,
+                    displayName: user.displayName,
+                    identityConfigured: profile !== null,
+                  })),
+                ),
+              );
+            }),
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.vcsListRefs]: (input) =>

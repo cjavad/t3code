@@ -110,6 +110,8 @@ import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as GitIdentityService from "./auth/GitIdentityService.ts";
+import * as ThreadGitEnvironmentService from "./auth/ThreadGitEnvironmentService.ts";
+import * as AuthUsers from "./persistence/AuthUsers.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import {
   connectHttpApiLayer,
@@ -243,7 +245,10 @@ const HttpServerLive = Layer.unwrap(
 
 const PlatformServicesLive = NodeServices.layer;
 
-const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+const PersistenceLayerLive = Layer.empty.pipe(
+  Layer.provideMerge(SqlitePersistenceLayerLive),
+  Layer.provideMerge(AuthUsers.layer),
+);
 
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProjectConfig.layer),
@@ -430,7 +435,16 @@ const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
   ),
 );
 
+// What a thread's agents run as in Git. GitWorkflowLayerLive already carries
+// GitIdentityService, and the persistence layer carries the user table this
+// maps thread identities through.
+const ThreadGitEnvironmentLayerLive = ThreadGitEnvironmentService.layer.pipe(
+  Layer.provide(GitWorkflowLayerLive),
+  Layer.provide(PersistenceLayerLive),
+);
+
 const OrchestrationV2RuntimeLayerLive = OrchestrationV2ProductionLayerLive.pipe(
+  Layer.provide(ThreadGitEnvironmentLayerLive),
   Layer.provide(ProviderEventIngestor.analyticsLive),
   Layer.provide(CheckpointStoreLayerLive),
   Layer.provide(GitWorkflowLayerLive),
