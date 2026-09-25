@@ -763,7 +763,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
             <h3 className="text-sm font-medium text-foreground">{primaryLabel}</h3>
           </div>
           <p className="text-xs text-muted-foreground">
-            Identity: <code className="font-mono text-[11px]">{pairingLink.subject}</code>
+            Identity: <code className="font-mono text-2xs">{pairingLink.subject}</code>
             <span aria-hidden> · </span>
             <Tooltip>
               <TooltipTrigger render={<span />}>
@@ -1021,7 +1021,7 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
             ) : null}
           </div>
           <p className="text-xs text-muted-foreground">
-            Identity: <code className="font-mono text-[11px]">{clientSession.subject}</code>
+            Identity: <code className="font-mono text-2xs">{clientSession.subject}</code>
             <span aria-hidden> · </span>
             {deviceInfoBits.length > 0 ? (
               <>
@@ -1165,7 +1165,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
                 placeholder="e.g. johan"
                 disabled={isCreatingPairingLink}
               />
-              <span className="mt-1 block text-[11px] text-muted-foreground">
+              <span className="mt-1 block text-2xs text-muted-foreground">
                 Reuse this subject across one person&apos;s devices to share Git identity and
                 signing settings.
               </span>
