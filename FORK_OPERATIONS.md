@@ -103,6 +103,16 @@ contributors.
 
 Deployment clones `fork/deploy` from GitHub, so the commit must be pushed first.
 
+**Before moving `fork/deploy`, check the live database ledger against the target's
+migration manifest — a fresh-DB smoke test cannot catch this.** Upstream reuses
+migration ids, and this instance's ledger was first written under V2-preview
+numbering (ids 48-62 meant different migrations). The migrator keys on the *id*,
+so a reused id is silently skipped and its schema change never runs (this broke a
+deploy once: `no such column: auto_settle_disabled_at`). Compare the target's
+`migrationEntries` against `effect_sql_migrations` in
+`<base-dir>/userdata/statev2.sqlite`; for any id recorded under a preview name,
+apply that migration's effect and rewrite the ledger row to the upstream name.
+
 - `/root/t3-remote/update.sh --prepare` — build the image only.
 - `/root/t3-remote/update.sh` — build if needed **and restart the service**.
 
