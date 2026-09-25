@@ -2469,8 +2469,8 @@ function NoteTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const files = (message.attachments ?? []).filter(isFileAttachment);
   return (
     <div className="flex w-full justify-center px-1">
-      <div className="w-full max-w-[80%] rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-        <div className="mb-1 flex items-center gap-2 text-[11px] font-medium text-amber-700/90 dark:text-amber-300/90">
+      <div className="w-full max-w-[80%] rounded-xl border border-warning/32 bg-warning-surface px-3 py-2">
+        <div className="mb-1 flex items-center gap-2 text-2xs font-medium text-warning-foreground">
           <StickyNoteIcon className="size-3.5 shrink-0" />
           <span className="uppercase tracking-wide">Note</span>
           {message.createdByName ? (
@@ -2495,7 +2495,7 @@ function NoteTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                   {url ? (
                     <img src={url} alt={image.name} className="block size-full object-cover" />
                   ) : (
-                    <div className="flex h-full items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                    <div className="flex h-full items-center justify-center px-2 py-3 text-center text-2xs text-muted-foreground/70">
                       {image.name}
                     </div>
                   )}

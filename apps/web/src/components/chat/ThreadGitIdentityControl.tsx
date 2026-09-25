@@ -11,14 +11,12 @@ import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
+import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
-  THREAD_DETAILS_PANEL_MENU_POPUP_CLASS,
-  THREAD_DETAILS_PANEL_ROW_CLASS,
 } from "./threadDetailsPanelStyles";
 
 /**
@@ -104,11 +102,10 @@ export function ThreadGitIdentityControl(props: {
       <Menu>
         <MenuTrigger
           render={
-            <Button
-              size="sm"
+            <ThreadDetailsControl
               variant="ghost"
+              part="row"
               disabled={busy}
-              className={THREAD_DETAILS_PANEL_ROW_CLASS}
               aria-label={`Commits as ${label}`}
             />
           }
@@ -124,7 +121,7 @@ export function ThreadGitIdentityControl(props: {
           <span className="min-w-0 flex-1 truncate text-left">Commits as {label}</span>
           <ChevronDownIcon aria-hidden="true" className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />
         </MenuTrigger>
-        <MenuPopup align="start" className={THREAD_DETAILS_PANEL_MENU_POPUP_CLASS}>
+        <MenuPopup align="start" className="min-w-60 max-w-(--available-width)">
           {candidates.length === 0 ? (
             <MenuItem disabled>No users available</MenuItem>
           ) : (
@@ -154,7 +151,7 @@ export function ThreadGitIdentityControl(props: {
         </MenuPopup>
       </Menu>
       {warning === null ? null : (
-        <p className="flex items-start gap-1.5 px-2.5 pb-1 text-[11px] leading-relaxed text-muted-foreground">
+        <p className="flex items-start gap-1.5 px-2.5 pb-1 text-2xs leading-relaxed text-muted-foreground">
           <AlertTriangleIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0 text-warning" />
           <span className="min-w-0">{warning}</span>
         </p>

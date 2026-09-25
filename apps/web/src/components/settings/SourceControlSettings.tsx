@@ -591,7 +591,7 @@ function GitIdentitySettings({ environmentId }: { readonly environmentId: Enviro
           type="password"
         />
         {identity.data?.signingKey ? (
-          <pre className="max-h-24 overflow-auto rounded-md bg-muted/40 p-2 text-[11px] text-muted-foreground">
+          <pre className="max-h-24 overflow-auto rounded-md bg-muted/40 p-2 text-2xs text-muted-foreground">
             {identity.data.signingKey}
           </pre>
         ) : null}
