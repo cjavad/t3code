@@ -329,6 +329,39 @@ it.effect("memory recovery selection includes unfinished items from missing runs
 );
 
 it.layer(TestLayer)("ProjectionStoreV2", (it) => {
+  it.effect("retains human notes in SQL snapshot windows without turn items", () =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = yield* addRolledBackRecoveryCandidate("bounded-note");
+      const now = yield* DateTime.now;
+      const messageId = MessageId.make("message:bounded-note");
+      yield* store.apply({
+        id: EventId.make("event:bounded-note"),
+        type: "message.updated",
+        threadId,
+        occurredAt: now,
+        payload: {
+          id: messageId,
+          threadId,
+          runId: null,
+          nodeId: null,
+          role: "note",
+          createdBy: "user",
+          creationSource: "web",
+          text: "A human-only note",
+          attachments: [],
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const snapshot = yield* store.getThreadSnapshotWindow(threadId, { rowLimit: 1 });
+      assert.include(
+        snapshot.projection.messages.map((message) => message.id),
+        messageId,
+      );
+    }),
+  );
   it.effect(
     "keeps restart-cancelled work through a stale run.updated",
     () => restartCancelledWorkSurvivesStaleRunUpdate,
