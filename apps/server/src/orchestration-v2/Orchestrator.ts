@@ -1580,6 +1580,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ...(queuedMessage.context ? { context: queuedMessage.context } : {}),
           createdBy: queuedMessage.createdBy,
           creationSource: queuedMessage.creationSource,
+          ...(queuedMessage.createdByUserId === undefined
+            ? {}
+            : { createdByUserId: queuedMessage.createdByUserId }),
           ...(queuedMessage.scheduledTaskId === undefined
             ? {}
             : { scheduledTaskId: queuedMessage.scheduledTaskId }),
@@ -2549,6 +2552,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
     }
 
+    // A thread's Git identity is inherited by the provider process at spawn
+    // time; an already-running process keeps the environment it started with.
+    // Changing it therefore has to end the current session so the next run
+    // starts as the newly assigned user.
+    const gitIdentityChanges =
+      command.type === "thread.metadata.update" &&
+      command.gitIdentityUserId !== undefined &&
+      command.gitIdentityUserId !== (thread.gitIdentity?.userId ?? null);
     const needsProviderState =
       command.type === "thread.runtime-mode.set" ||
       command.type === "thread.model-selection.set" ||
@@ -2557,7 +2568,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       command.type === "thread.settle" ||
       (command.type === "thread.metadata.update" &&
         command.worktreePath !== undefined &&
-        command.worktreePath !== thread.worktreePath);
+        command.worktreePath !== thread.worktreePath) ||
+      gitIdentityChanges;
     const providerContext = needsProviderState
       ? yield* projectionStore
           .getThreadProviderContext(
@@ -2826,6 +2838,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     Date.parse(thread.limitRecovery.resetAt)
                 ? { snoozedUntil: null, snoozedAt: null }
                 : {}),
+            ...(command.gitIdentityUserId === undefined
+              ? {}
+              : {
+                  gitIdentity:
+                    command.gitIdentityUserId === null
+                      ? null
+                      : {
+                          userId: command.gitIdentityUserId,
+                          source: "explicit" as const,
+                          assignedByUserId: command.gitIdentityAssignedByUserId ?? null,
+                          assignedAt: now,
+                        },
+                }),
             ...(command.branch === undefined ? {} : { branch: command.branch }),
             ...(command.worktreePath === undefined ? {} : { worktreePath: command.worktreePath }),
             ...(command.linkedPullRequest === undefined
@@ -3210,8 +3235,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       command.type === "thread.archive" || command.type === "thread.settle"
         ? (providerContext?.providerSessions ?? []).map((session) => session.id)
         : command.type === "thread.metadata.update" &&
-            command.worktreePath !== undefined &&
-            command.worktreePath !== thread.worktreePath
+            (gitIdentityChanges ||
+              (command.worktreePath !== undefined && command.worktreePath !== thread.worktreePath))
           ? (providerContext?.providerSessions ?? []).map((session) => session.id)
           : command.type === "thread.runtime-mode.set"
             ? (providerContext?.providerSessions ?? [])
@@ -3250,7 +3275,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     : command.type === "thread.settle"
                       ? "Thread settled."
                       : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
+                        ? gitIdentityChanges
+                          ? "Git identity changed."
+                          : "Workspace changed."
                         : command.type === "thread.runtime-mode.set"
                           ? "Runtime mode changed."
                           : "Provider or model selection changed.",
@@ -3269,7 +3296,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     : command.type === "thread.settle"
                       ? "Thread settled."
                       : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
+                        ? gitIdentityChanges
+                          ? "Git identity changed."
+                          : "Workspace changed."
                         : command.type === "thread.runtime-mode.set"
                           ? "Runtime mode changed."
                           : "Provider or model selection changed.",
@@ -3610,6 +3639,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
     readonly createdBy: OrchestrationV2ConversationMessage["createdBy"];
     readonly creationSource: OrchestrationV2ConversationMessage["creationSource"];
+    readonly createdByUserId?: OrchestrationV2ConversationMessage["createdByUserId"];
+    readonly createdByName?: OrchestrationV2ConversationMessage["createdByName"];
     readonly scheduledTaskId?: OrchestrationV2ConversationMessage["scheduledTaskId"];
     readonly senderThreadId?: OrchestrationV2ConversationMessage["senderThreadId"];
     readonly delegatedCompletion?: OrchestrationV2ConversationMessage["delegatedCompletion"];
@@ -3751,6 +3782,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           const message: OrchestrationV2ConversationMessage = {
             createdBy: input.createdBy,
             creationSource: input.creationSource,
+            ...(input.createdByUserId === undefined
+              ? {}
+              : { createdByUserId: input.createdByUserId }),
+            ...(input.createdByName === undefined ? {} : { createdByName: input.createdByName }),
             ...(input.delegatedCompletion === undefined
               ? {}
               : { delegatedCompletion: input.delegatedCompletion }),
@@ -3773,6 +3808,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           const turnItem: OrchestrationV2TurnItem = {
             createdBy: input.createdBy,
             creationSource: input.creationSource,
+            ...(input.createdByUserId === undefined
+              ? {}
+              : { createdByUserId: input.createdByUserId }),
+            ...(input.createdByName === undefined ? {} : { createdByName: input.createdByName }),
             ...(input.scheduledTaskId === undefined
               ? {}
               : { scheduledTaskId: input.scheduledTaskId }),
@@ -4378,6 +4417,51 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
 
+      // A note is a message for the other people in the thread. It is appended
+      // and broadcast, but it carries no run: no provider ever reads it, and it
+      // cannot claim a Git identity or start work.
+      if (command.dispatchMode.type === "note") {
+        const now = yield* DateTime.now;
+        const note: OrchestrationV2ConversationMessage = {
+          createdBy: command.createdBy,
+          creationSource: command.creationSource,
+          ...(command.createdByUserId === undefined
+            ? {}
+            : { createdByUserId: command.createdByUserId }),
+          ...(command.createdByName === undefined ? {} : { createdByName: command.createdByName }),
+          ...(command.scheduledTaskId === undefined
+            ? {}
+            : { scheduledTaskId: command.scheduledTaskId }),
+          id: command.messageId,
+          threadId: command.threadId,
+          runId: null,
+          nodeId: null,
+          role: "note",
+          text: command.text,
+          ...(command.context ? { context: command.context } : {}),
+          attachments: command.attachments,
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const emitNote = emit(events, command);
+        yield* emitNote({
+          type: "message.updated",
+          threadId: command.threadId,
+          providerInstanceId: projection.thread.providerInstanceId,
+          occurredAt: now,
+          payload: note,
+        });
+        // Keep notes out of titles, but let one count as the latest activity.
+        yield* emitNote({
+          type: "thread.metadata-updated",
+          threadId: command.threadId,
+          providerInstanceId: projection.thread.providerInstanceId,
+          occurredAt: now,
+          payload: { ...projection.thread, updatedAt: now },
+        });
+        return;
+      }
       if (command.restartContinuationOfRunId !== undefined) {
         const source = projection.runs.find((run) => run.id === command.restartContinuationOfRunId);
         if (
@@ -4451,6 +4535,42 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
         projection = yield* getProjectionWithPendingEvents(command.threadId, events);
       }
+      // The first genuine user message claims the thread for its sender, and
+      // every later run commits as that person no matter who continues the
+      // thread. Creation deliberately claims nothing, so forks, imports and
+      // scheduled shells stay unassigned until somebody actually speaks in
+      // them. Commands are decided serially per thread, so two racing first
+      // messages cannot both claim.
+      if (
+        projection.thread.gitIdentity == null &&
+        command.createdBy === "user" &&
+        command.createdByUserId !== undefined &&
+        !isNativeMaintenanceCommand(command)
+      ) {
+        const claimedAt = yield* DateTime.now;
+        const claimed: OrchestrationV2AppThread = {
+          ...projection.thread,
+          gitIdentity: {
+            userId: command.createdByUserId,
+            source: "first_message",
+            assignedByUserId: command.createdByUserId,
+            assignedAt: claimedAt,
+          },
+          updatedAt: claimedAt,
+        };
+        yield* emit(
+          events,
+          command,
+        )({
+          type: "thread.metadata-updated",
+          threadId: command.threadId,
+          providerInstanceId: claimed.providerInstanceId,
+          occurredAt: claimedAt,
+          payload: claimed,
+        });
+        projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      }
+
       const userMessages = projection.messages.filter((message) => message.role === "user");
       const onlyMaintenanceHistory =
         userMessages.length > 0 && userMessages.every(isNativeMaintenanceCommand);
@@ -4669,6 +4789,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               : (projection.runs.find((run) => run.id === dispatchMode.targetRunId)
                   ?.modelSelection ?? modelSelection),
           delegatedCompletion,
+          ...(command.createdByUserId === undefined
+            ? {}
+            : { createdByUserId: command.createdByUserId }),
+          ...(command.createdByName === undefined ? {} : { createdByName: command.createdByName }),
           targetRunId: dispatchMode.targetRunId,
           messageId: command.messageId,
           text: dispatchText,
@@ -4860,6 +4984,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const message: OrchestrationV2ConversationMessage = {
           createdBy: command.createdBy,
           creationSource: command.creationSource,
+          ...(command.createdByUserId === undefined
+            ? {}
+            : { createdByUserId: command.createdByUserId }),
+          ...(command.createdByName === undefined ? {} : { createdByName: command.createdByName }),
           ...(command.scheduledTaskId === undefined
             ? {}
             : { scheduledTaskId: command.scheduledTaskId }),
@@ -5203,6 +5331,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const message: OrchestrationV2ConversationMessage = {
           createdBy: command.createdBy,
           creationSource: command.creationSource,
+          ...(command.createdByUserId === undefined
+            ? {}
+            : { createdByUserId: command.createdByUserId }),
+          ...(command.createdByName === undefined ? {} : { createdByName: command.createdByName }),
           ...(command.scheduledTaskId === undefined
             ? {}
             : { scheduledTaskId: command.scheduledTaskId }),
@@ -5226,6 +5358,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const turnItem: OrchestrationV2TurnItem = {
           createdBy: command.createdBy,
           creationSource: command.creationSource,
+          ...(command.createdByUserId === undefined
+            ? {}
+            : { createdByUserId: command.createdByUserId }),
+          ...(command.createdByName === undefined ? {} : { createdByName: command.createdByName }),
           ...(command.scheduledTaskId === undefined
             ? {}
             : { scheduledTaskId: command.scheduledTaskId }),
@@ -5897,6 +6033,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const message: OrchestrationV2ConversationMessage = {
         createdBy: command.createdBy,
         creationSource: command.creationSource,
+        ...(command.createdByUserId === undefined
+          ? {}
+          : { createdByUserId: command.createdByUserId }),
+        ...(command.createdByName === undefined ? {} : { createdByName: command.createdByName }),
         ...(command.scheduledTaskId === undefined
           ? {}
           : { scheduledTaskId: command.scheduledTaskId }),
@@ -5918,6 +6058,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const turnItem: OrchestrationV2TurnItem = {
         createdBy: command.createdBy,
         creationSource: command.creationSource,
+        ...(command.createdByUserId === undefined
+          ? {}
+          : { createdByUserId: command.createdByUserId }),
+        ...(command.createdByName === undefined ? {} : { createdByName: command.createdByName }),
         ...(command.scheduledTaskId === undefined
           ? {}
           : { scheduledTaskId: command.scheduledTaskId }),
@@ -7204,6 +7348,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(queuedMessage.context ? { context: queuedMessage.context } : {}),
         createdBy: queuedMessage.createdBy,
         creationSource: queuedMessage.creationSource,
+        ...(queuedMessage.createdByUserId === undefined
+          ? {}
+          : { createdByUserId: queuedMessage.createdByUserId }),
         ...(queuedMessage.scheduledTaskId === undefined
           ? {}
           : { scheduledTaskId: queuedMessage.scheduledTaskId }),

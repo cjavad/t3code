@@ -428,6 +428,68 @@ const SharedApplicationDataPlaneTestLayer = Layer.mergeAll(
 );
 
 it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
+  it.effect("records a note as a message that starts no run", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("runtime-layer-note-thread");
+
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-note-create"),
+        threadId,
+        projectId: ProjectId.make("runtime-layer-note-project"),
+        title: "Note thread",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+
+      const result = yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-note-dispatch"),
+        threadId,
+        messageId: MessageId.make("runtime-layer-note-message"),
+        text: "Ping the customer before shipping this.",
+        attachments: [],
+        createdByUserId: "user:johan",
+        createdByName: "Johan",
+        dispatchMode: { type: "note" },
+      });
+
+      const projection = yield* orchestrator.getThreadProjection(threadId);
+      const note = projection.messages.find(
+        (message) => message.id === "runtime-layer-note-message",
+      );
+      assert.equal(note?.role, "note");
+      assert.equal(note?.runId, null);
+      assert.equal(note?.createdByName, "Johan");
+      const shell = yield* orchestrator.getThreadShell(threadId);
+      assert.ok(shell);
+      assert.equal(
+        DateTime.formatIso(shell.latestUserMessageAt!),
+        DateTime.formatIso(note!.updatedAt),
+      );
+      assert.equal(
+        DateTime.formatIso(shell.latestUserAuthoredMessageAt!),
+        DateTime.formatIso(note!.updatedAt),
+      );
+      // A note is not a turn: it must not start a run, allocate a turn item, or
+      // touch the provider in any way.
+      assert.deepEqual(projection.runs, []);
+      assert.deepEqual(projection.turnItems, []);
+      assert.deepEqual(
+        result.storedEvents.map((stored) => stored.event.type),
+        ["message.updated", "thread.metadata-updated"],
+      );
+    }),
+  );
+
   it.effect("emits model updates separately from provider switches", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -4753,6 +4815,89 @@ it.layer(TestLayer)("usage-limit recovery", (it) => {
         assert.equal(resumed.runs[1]?.status, "starting");
         assert.isFalse(resumed.runs[1]?.queueHeld);
       }
+    }),
+  );
+});
+it.layer(TestLayer)("thread git identity", (it) => {
+  it.effect("claims a Git identity from the first user message and keeps it", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("runtime-git-identity");
+      const identityOf = Effect.fnUntraced(function* () {
+        return (yield* orchestrator.getThreadProjection(threadId)).thread.gitIdentity ?? null;
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        createdByUserId: "user:johan",
+        commandId: CommandId.make("runtime-git-identity-create"),
+        threadId,
+        projectId: ProjectId.make("runtime-git-identity-project"),
+        title: "Git identity",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: process.cwd(),
+      });
+      // Creating a thread claims nothing: forks and imported shells must not
+      // inherit an identity from whoever happened to open them.
+      assert.equal(yield* identityOf(), null);
+
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        createdByUserId: "user:johan",
+        commandId: CommandId.make("runtime-git-identity-message"),
+        threadId,
+        messageId: MessageId.make("runtime-git-identity-message"),
+        text: "Start the work.",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+      });
+      const claimed = yield* identityOf();
+      assert.equal(claimed?.userId, "user:johan");
+      assert.equal(claimed?.source, "first_message");
+
+      // A colleague continuing the thread is attributed as its author, but does
+      // not take over what its agents commit as.
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        createdByUserId: "user:javad",
+        commandId: CommandId.make("runtime-git-identity-continue"),
+        threadId,
+        messageId: MessageId.make("runtime-git-identity-continue"),
+        text: "Continuing for you.",
+        attachments: [],
+        dispatchMode: { type: "queue_after_active" },
+      });
+      assert.equal((yield* identityOf())?.userId, "user:johan");
+
+      // An explicit hand-over wins, and records who made it.
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("runtime-git-identity-assign"),
+        threadId,
+        gitIdentityUserId: "user:javad",
+        gitIdentityAssignedByUserId: "user:johan",
+      });
+      const reassigned = yield* identityOf();
+      assert.equal(reassigned?.userId, "user:javad");
+      assert.equal(reassigned?.source, "explicit");
+      assert.equal(reassigned?.assignedByUserId, "user:johan");
+
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("runtime-git-identity-clear"),
+        threadId,
+        gitIdentityUserId: null,
+        gitIdentityAssignedByUserId: "user:johan",
+      });
+      assert.equal(yield* identityOf(), null);
     }),
   );
 });

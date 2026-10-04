@@ -1576,7 +1576,10 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           providerSessionId: input.providerSessionId,
           runtimePolicy: input.runtimePolicy,
           settings: resolvedRuntime?.config ?? adapterOptions.settings,
-          environment: resolvedRuntime?.environment ?? adapterOptions.environment,
+          environment: McpProviderSession.withGitExecutionEnvironmentForThread(
+            resolvedRuntime?.environment ?? adapterOptions.environment,
+            input.threadId,
+          ),
         });
         const additionalContextByThread = yield* Ref.make(
           new Map<

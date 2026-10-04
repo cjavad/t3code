@@ -130,6 +130,8 @@ export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly regenerateTitle?: boolean;
   /** Link (object) or unlink (null) a pull request (#8160). */
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
+  /** Assign (user id) or clear (null) the Git identity the thread's agents commit as. */
+  readonly gitIdentityUserId?: string | null;
 }
 
 export interface SetThreadRuntimeModeInput extends ThreadCommandInput {
@@ -178,6 +180,12 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
   readonly bootstrap?: StartThreadBootstrap;
   readonly sourceProposedPlan?: { readonly threadId: ThreadId; readonly planId: PlanId };
   readonly dispatchMode?: "auto" | "queue" | "steer" | "restart" | "start";
+  /**
+   * `"note"` records a human-only message: it is appended to the transcript and
+   * broadcast to other people in the thread, but it starts no turn and is never
+   * sent to a provider.
+   */
+  readonly mode?: "note";
 }
 
 export interface InterruptThreadTurnInput extends ThreadCommandInput {
@@ -566,7 +574,8 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.worktreePath !== undefined ||
       input.regenerateTitle !== undefined ||
       input.linkedPullRequest !== undefined ||
-      input.limitRecovery !== undefined
+      input.limitRecovery !== undefined ||
+      input.gitIdentityUserId !== undefined
     ) {
       result = yield* dispatch({
         type: "thread.metadata.update",
@@ -580,6 +589,9 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
         ...(input.linkedPullRequest === undefined
           ? {}
           : { linkedPullRequest: input.linkedPullRequest }),
+        ...(input.gitIdentityUserId === undefined
+          ? {}
+          : { gitIdentityUserId: input.gitIdentityUserId }),
       });
     }
     if (input.modelSelection !== undefined) {
@@ -636,6 +648,20 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     input.message.attachments,
     attachments,
   );
+  if (input.mode === "note") {
+    return yield* dispatch({
+      type: "message.dispatch",
+      commandId,
+      createdBy: "user",
+      creationSource: input.creationSource ?? "web",
+      threadId: input.threadId,
+      messageId: input.message.messageId,
+      text: input.message.text,
+      ...(context ? { context } : {}),
+      attachments,
+      dispatchMode: { type: "note" },
+    });
+  }
   const bootstrap = input.bootstrap?.createThread;
   const prepareWorktree = input.bootstrap?.prepareWorktree;
   if (bootstrap !== undefined || prepareWorktree !== undefined) {

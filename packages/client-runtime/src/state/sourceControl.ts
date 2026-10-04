@@ -21,6 +21,24 @@ export function createSourceControlEnvironmentAtoms<R, E>(
       label: "environment-data:server:source-control-discovery",
       tag: WS_METHODS.serverDiscoverSourceControl,
     }),
+    gitIdentity: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:git:identity",
+      tag: WS_METHODS.gitIdentityGet,
+    }),
+    /** Users a thread's Git identity can be assigned to. */
+    gitIdentityUsers: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:git:identity-users",
+      tag: WS_METHODS.gitIdentityUsers,
+    }),
+    updateGitIdentity: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:update-identity",
+      tag: WS_METHODS.gitIdentityUpdate,
+      scheduler: commandScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId }) => environmentId,
+      },
+    }),
     repository: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:source-control:repository",
       tag: WS_METHODS.sourceControlLookupRepository,

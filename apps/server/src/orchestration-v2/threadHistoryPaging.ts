@@ -370,6 +370,9 @@ function messagesForBoundedProjection(
 
   return projection.messages.filter(
     (message) =>
+      // A note belongs to no run and no turn item, so nothing else would retain
+      // it: without this the bounded projection drops it moments after it lands.
+      message.role === "note" ||
       retainedMessageIds.has(String(message.id)) ||
       (message.runId !== null && retainedRunIds.has(String(message.runId))) ||
       message.delegatedCompletion !== undefined,

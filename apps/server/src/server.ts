@@ -116,6 +116,10 @@ import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ReplayMarkers from "./auth/replayMarkers.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import * as GitIdentityService from "./auth/GitIdentityService.ts";
+import * as ThreadGitEnvironmentService from "./auth/ThreadGitEnvironmentService.ts";
+import * as AuthUsers from "./persistence/AuthUsers.ts";
+import * as CloudDevices from "./persistence/CloudDevices.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import {
   connectHttpApiLayer,
@@ -262,7 +266,11 @@ const HttpServerLive = Layer.unwrap(
 
 const PlatformServicesLive = NodeServices.layer;
 
-const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistence.layerConfig));
+const PersistenceLayerLive = Layer.empty.pipe(
+  Layer.provideMerge(SqlitePersistence.layerConfig),
+  Layer.provideMerge(AuthUsers.layer),
+  Layer.provideMerge(CloudDevices.layer),
+);
 
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProjectConfig.layer),
@@ -334,6 +342,12 @@ const GitManagerLayerLive = GitManager.layer.pipe(
   Layer.provideMerge(WorktreeSetupTracker.layer),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
+  Layer.provideMerge(
+    GitIdentityService.layer.pipe(
+      Layer.provide(ServerSecretStore.layer),
+      Layer.provide(VcsProcess.layer),
+    ),
+  ),
   Layer.provideMerge(
     TextGeneration.layer.pipe(Layer.provide(SourceControlProviderRegistryLayerLive)),
   ),
@@ -443,7 +457,16 @@ const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
   ),
 );
 
+// What a thread's agents run as in Git. GitWorkflowLayerLive already carries
+// GitIdentityService, and the persistence layer carries the user table this
+// maps thread identities through.
+const ThreadGitEnvironmentLayerLive = ThreadGitEnvironmentService.layer.pipe(
+  Layer.provide(GitWorkflowLayerLive),
+  Layer.provide(PersistenceLayerLive),
+);
+
 const OrchestrationV2RuntimeLayerLive = OrchestrationV2ProductionLayerLive.pipe(
+  Layer.provide(ThreadGitEnvironmentLayerLive),
   Layer.provide(ProviderEventIngestor.analyticsLive),
   Layer.provide(CheckpointStoreLayerLive),
   Layer.provide(GitWorkflowLayerLive),

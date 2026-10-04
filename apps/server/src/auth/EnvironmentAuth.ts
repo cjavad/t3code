@@ -888,7 +888,10 @@ export const make = Effect.gen(function* () {
       const createdAt = yield* DateTime.now;
       const issued = yield* bootstrapCredentials.issueOneTimeToken({
         scopes: input?.scopes ?? AuthStandardClientScopes,
-        subject: input?.subject ?? "one-time-token",
+        // A labeled pairing link is a convenient stable per-person subject.
+        // Callers may still provide an explicit subject when labels are not
+        // suitable as an identity key.
+        subject: input?.subject ?? input?.label ?? "one-time-token",
         ...(input?.ttl ? { ttl: input.ttl } : {}),
         ...(input?.label ? { label: input.label } : {}),
         ...(input?.proofKeyThumbprint ? { proofKeyThumbprint: input.proofKeyThumbprint } : {}),
@@ -982,7 +985,7 @@ export const make = Effect.gen(function* () {
   const issuePairingCredential: EnvironmentAuth["Service"]["issuePairingCredential"] = (input) =>
     issuePairingCredentialForSubject({
       scopes: input?.scopes ?? AuthStandardClientScopes,
-      subject: "one-time-token",
+      subject: input?.subject ?? "one-time-token",
       ...(input?.label ? { label: input.label } : {}),
     }).pipe(Effect.withSpan("EnvironmentAuth.issuePairingCredential"));
 

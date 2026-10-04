@@ -174,6 +174,11 @@ export interface GitCommitProgress {
 export interface GitCommitOptions {
   readonly timeoutMs?: number;
   readonly progress?: GitCommitProgress;
+  readonly identity?: {
+    readonly displayName: string;
+    readonly email: string;
+    readonly signingKeyPath: string;
+  };
   /** Stage the current working tree immediately before committing. */
   readonly stage?: { readonly filePaths?: readonly string[] };
 }

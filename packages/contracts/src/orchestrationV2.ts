@@ -86,6 +86,10 @@ export type OrchestrationV2ThreadHistoryOrigin = typeof OrchestrationV2ThreadHis
 const OrchestrationV2CreationFields = {
   createdBy: OrchestrationV2Actor,
   creationSource: OrchestrationV2CreationSource,
+  /** Stable user entity responsible for a user-created record. */
+  createdByUserId: Schema.optional(TrimmedNonEmptyString),
+  /** Display-name snapshot for `createdByUserId`, resolved once at write time. */
+  createdByName: Schema.optional(TrimmedNonEmptyString),
 } as const;
 
 export const OrchestrationV2NativeRefStrength = Schema.Literals(["strong", "weak", "none"]);
@@ -106,6 +110,24 @@ export const OrchestrationV2AppThreadLineage = Schema.Struct({
   rootThreadId: ThreadId,
 });
 export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLineage.Type;
+
+/**
+ * The user a thread's agents act as in Git. Persisted on the thread rather
+ * than read from the connected session: a scheduled run, a resumed thread and
+ * a colleague pressing "continue" must all commit as the person the thread
+ * belongs to, and a provider process started with no identity at all must fail
+ * loudly instead of falling back to a shared one.
+ */
+export const OrchestrationV2ThreadGitIdentity = Schema.Struct({
+  /** `auth_users.id` whose Git profile, signing key and GitHub token agents inherit. */
+  userId: TrimmedNonEmptyString,
+  /** Claimed by the thread's first user message, or assigned by hand. */
+  source: Schema.Literals(["first_message", "explicit"]),
+  /** Who assigned it. Null for a claim, or when the assigning user is unknown. */
+  assignedByUserId: Schema.NullOr(TrimmedNonEmptyString),
+  assignedAt: Schema.DateTimeUtc,
+});
+export type OrchestrationV2ThreadGitIdentity = typeof OrchestrationV2ThreadGitIdentity.Type;
 
 export const OrchestrationV2ContextTransferType = Schema.Literals([
   "fork",
@@ -365,6 +387,9 @@ export const OrchestrationV2AppThread = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  /** Git identity this thread's agents commit as; absent on threads created
+      before persistent identity, which claim one on their next user message. */
+  gitIdentity: Schema.optional(Schema.NullOr(OrchestrationV2ThreadGitIdentity)),
   /** Pull request the user linked to this thread (#8160); optional so
       pre-linking servers still decode. */
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -1061,7 +1086,7 @@ export const OrchestrationV2ConversationMessage = Schema.Struct({
   threadId: ThreadId,
   runId: Schema.NullOr(RunId),
   nodeId: Schema.NullOr(NodeId),
-  role: Schema.Literals(["user", "assistant", "system"]),
+  role: Schema.Literals(["user", "assistant", "system", "note"]),
   text: Schema.String,
   context: Schema.optional(OrchestrationMessageContext),
   attachments: Schema.Array(ChatAttachment),
@@ -1722,6 +1747,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  /** Git identity this thread's agents commit as. */
+  gitIdentity: Schema.optional(Schema.NullOr(OrchestrationV2ThreadGitIdentity)),
   /** Pull request the user linked to this thread (#8160). */
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
@@ -1879,6 +1906,14 @@ export const OrchestrationV2AppThreadJson = OrchestrationV2AppThread.mapFields((
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtcFromString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  gitIdentity: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        ...OrchestrationV2ThreadGitIdentity.fields,
+        assignedAt: Schema.DateTimeUtcFromString,
+      }),
+    ),
   ),
   titleRegeneration: Schema.optional(
     Schema.NullOr(
@@ -2275,6 +2310,14 @@ export type OrchestrationV2LatestVisibleMessageSummaryJson =
 
 export const OrchestrationV2ThreadShellJson = OrchestrationV2ThreadShell.mapFields((fields) => ({
   ...fields,
+  gitIdentity: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        ...OrchestrationV2ThreadGitIdentity.fields,
+        assignedAt: Schema.DateTimeUtcFromString,
+      }),
+    ),
+  ),
   latestRunRequestedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   latestRunStartedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   latestRunCompletedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
@@ -2615,6 +2658,11 @@ export const OrchestrationV2Command = Schema.Union([
     /** Reject unless no message or run has landed on this thread. */
     expectedEmpty: Schema.optional(Schema.Boolean),
     limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecoveryUpdate)),
+    /** Assign (user id) or clear (null) the thread's Git identity; absent leaves it alone. */
+    gitIdentityUserId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+    /** Audit trail for the assignment. The transport overwrites whatever a
+        client sends with the authenticated user, so it cannot be forged. */
+    gitIdentityAssignedByUserId: Schema.optional(TrimmedNonEmptyString),
     /** Link (object) or unlink (null) a pull request (#8160); absent leaves it unchanged. */
     linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   }),
@@ -2738,6 +2786,8 @@ export const OrchestrationV2Command = Schema.Union([
       Schema.Struct({ type: Schema.Literal("restart_active"), targetRunId: RunId }),
       Schema.Struct({ type: Schema.Literal("queue_after_active") }),
       Schema.Struct({ type: Schema.Literal("start_immediately") }),
+      /** A human-only note: appended to the transcript, never sent to a provider. */
+      Schema.Struct({ type: Schema.Literal("note") }),
     ]),
   }),
   Schema.Struct({

@@ -1,5 +1,6 @@
 import {
   AuthAccessReadScope,
+  AuthCloudConnectUnassignedSubject,
   AuthAccessWriteScope,
   AuthStandardClientScopes,
   AuthOrchestrationOperateScope,
@@ -36,6 +37,8 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
 import * as SessionStore from "./SessionStore.ts";
+import * as AuthUsers from "../persistence/AuthUsers.ts";
+import * as CloudDevices from "../persistence/CloudDevices.ts";
 import { traceAuthenticatedRelayRequest, traceRelayRequest } from "../cloud/traceRelayRequest.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
 import { verifyRequestDpopProof } from "./dpop.ts";
@@ -233,6 +236,8 @@ export const authHttpApiLayer = HttpApiBuilder.group(
   Effect.fnUntraced(function* (handlers) {
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
     const sessions = yield* SessionStore.SessionStore;
+    const cloudDevices = yield* CloudDevices.CloudDeviceRepository;
+    const authUsers = yield* AuthUsers.AuthUserRepository;
 
     return handlers
       .handle(
@@ -446,6 +451,65 @@ export const authHttpApiLayer = HttpApiBuilder.group(
           },
           Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
             failEnvironmentInternal("pairing_link_revoke_failed", error),
+          ),
+        ),
+      )
+      .handle(
+        "cloudDevices",
+        Effect.fn("environment.auth.cloudDevices")(
+          function* (args) {
+            yield* annotateEnvironmentRequest(args.endpoint.name);
+            yield* requireEnvironmentScope(AuthAccessReadScope);
+            const [devices, users] = yield* Effect.all([cloudDevices.list(), authUsers.list()]);
+            const userIdBySubject = new Map(users.map((user) => [user.subject, user.id]));
+            // A device whose owner was deleted reports as unassigned rather
+            // than pointing at a user id nothing can resolve.
+            return devices.map((device) => ({
+              proofKeyThumbprint: device.proofKeyThumbprint,
+              userId:
+                device.subject === null ? null : (userIdBySubject.get(device.subject) ?? null),
+              label: device.label,
+              firstSeenAt: device.firstSeenAt,
+              lastSeenAt: device.lastSeenAt,
+              assignedByUserId:
+                device.assignedBySubject === null
+                  ? null
+                  : (userIdBySubject.get(device.assignedBySubject) ?? null),
+              assignedAt: device.assignedAt,
+            }));
+          },
+          Effect.catchTag("PersistenceSqlError", (error) =>
+            failEnvironmentInternal("cloud_devices_load_failed", error),
+          ),
+        ),
+      )
+      .handle(
+        "assignCloudDevice",
+        Effect.fn("environment.auth.assignCloudDevice")(
+          function* (args) {
+            yield* annotateEnvironmentRequest(args.endpoint.name);
+            const session = yield* requireEnvironmentScope(AuthAccessWriteScope);
+            // Claiming a device hands its holder this person's signing key and
+            // GitHub token on every thread they start, so it takes the same
+            // permission as handing out a pairing credential.
+            const owner =
+              args.payload.userId === null ? null : yield* authUsers.getById(args.payload.userId);
+            if (
+              (args.payload.userId !== null && owner === null) ||
+              owner?.subject === AuthCloudConnectUnassignedSubject
+            ) {
+              return yield* failEnvironmentInvalidRequest("invalid_cloud_device_subject");
+            }
+            const assigned = yield* cloudDevices.assign({
+              proofKeyThumbprint: args.payload.proofKeyThumbprint,
+              subject: owner?.subject ?? null,
+              assignedBySubject: session.subject,
+              now: DateTime.formatIso(yield* DateTime.now),
+            });
+            return { assigned };
+          },
+          Effect.catchTag("PersistenceSqlError", (error) =>
+            failEnvironmentInternal("cloud_device_assign_failed", error),
           ),
         ),
       )

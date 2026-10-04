@@ -10,17 +10,20 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 
 import {
   AuthAccessTokenResult,
+  AuthAssignCloudDeviceInput,
   AuthBrowserSessionRequest,
   AuthBrowserSessionResult,
   AuthClientSession,
+  AuthCloudDevice,
+  AuthCloudDeviceAssignResult,
   AuthCreatePairingCredentialInput,
+  AuthEnvironmentScope,
   AuthPairingCredentialResult,
   AuthPairingLink,
   AuthRevokeClientSessionInput,
   AuthRevokePairingLinkInput,
-  AuthEnvironmentScope,
-  AuthTokenExchangeRequest,
   AuthSessionState,
+  AuthTokenExchangeRequest,
   AuthWebSocketTicketResult,
   ServerAuthSessionMethod,
 } from "./auth.ts";
@@ -78,6 +81,7 @@ export const EnvironmentRequestInvalidReason = Schema.Literals([
   "scope_not_granted",
   "invalid_command",
   "invalid_history_cursor",
+  "invalid_cloud_device_subject",
 ]);
 export type EnvironmentRequestInvalidReason = typeof EnvironmentRequestInvalidReason.Type;
 
@@ -103,6 +107,8 @@ export const EnvironmentInternalErrorReason = Schema.Literals([
   "pairing_link_revoke_failed",
   "client_sessions_load_failed",
   "client_session_revoke_failed",
+  "cloud_devices_load_failed",
+  "cloud_device_assign_failed",
   "project_snapshot_failed",
   "project_mutation_failed",
   "orchestration_snapshot_failed",
@@ -483,6 +489,21 @@ class EnvironmentAuthHttpApi extends HttpApiGroup.make("auth")
       payload: AuthRevokePairingLinkInput,
       success: AuthPairingLinkRevokeResult,
       error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("cloudDevices", "/api/auth/cloud-devices", {
+      headers: OptionalBearerHeaders,
+      success: Schema.Array(AuthCloudDevice),
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("assignCloudDevice", "/api/auth/cloud-devices/assign", {
+      headers: OptionalBearerHeaders,
+      payload: AuthAssignCloudDeviceInput,
+      success: AuthCloudDeviceAssignResult,
+      error: EnvironmentPairingCredentialErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(

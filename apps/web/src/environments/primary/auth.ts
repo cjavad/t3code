@@ -1,6 +1,7 @@
 import type {
   AuthBrowserSessionResult,
   AuthClientMetadata,
+  AuthCloudDevice,
   AuthEnvironmentScope,
   AuthPairingCredentialResult,
   ServerAuthSessionMethod,
@@ -26,6 +27,8 @@ const PrimaryEnvironmentRequestOperation = Schema.Literals([
   "exchange-bootstrap-credential",
   "fetch-environment-descriptor",
   "create-pairing-credential",
+  "list-cloud-devices",
+  "assign-cloud-device",
   "list-pairing-links",
   "revoke-pairing-link",
   "list-client-sessions",
@@ -352,9 +355,11 @@ export async function submitServerAuthCredential(credential: string): Promise<vo
 
 export async function createServerPairingCredential(input?: {
   readonly label?: string;
+  readonly subject?: string;
   readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
 }): Promise<AuthPairingCredentialResult> {
   const trimmedLabel = input?.label?.trim();
+  const trimmedSubject = input?.subject?.trim();
   try {
     return await runPrimaryHttp(
       PrimaryEnvironmentHttpClient.pipe(
@@ -363,6 +368,7 @@ export async function createServerPairingCredential(input?: {
             headers: {},
             payload: {
               ...(trimmedLabel ? { label: trimmedLabel } : {}),
+              ...(trimmedSubject ? { subject: trimmedSubject } : {}),
               ...(input?.scopes ? { scopes: input.scopes } : {}),
             },
           }),
@@ -372,6 +378,40 @@ export async function createServerPairingCredential(input?: {
   } catch (error) {
     throw PrimaryEnvironmentRequestError.fromCause({
       operation: "create-pairing-credential",
+      cause: error,
+    });
+  }
+}
+
+export async function fetchServerCloudDevices(): Promise<ReadonlyArray<AuthCloudDevice>> {
+  try {
+    return await runPrimaryHttp(
+      PrimaryEnvironmentHttpClient.pipe(
+        Effect.flatMap((client) => client.auth.cloudDevices({ headers: {} })),
+      ),
+    );
+  } catch (error) {
+    throw PrimaryEnvironmentRequestError.fromCause({
+      operation: "list-cloud-devices",
+      cause: error,
+    });
+  }
+}
+
+export async function assignServerCloudDevice(input: {
+  readonly proofKeyThumbprint: string;
+  readonly userId: string | null;
+}): Promise<boolean> {
+  try {
+    const result = await runPrimaryHttp(
+      PrimaryEnvironmentHttpClient.pipe(
+        Effect.flatMap((client) => client.auth.assignCloudDevice({ headers: {}, payload: input })),
+      ),
+    );
+    return result.assigned;
+  } catch (error) {
+    throw PrimaryEnvironmentRequestError.fromCause({
+      operation: "assign-cloud-device",
       cause: error,
     });
   }

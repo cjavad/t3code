@@ -89,6 +89,8 @@ export interface ThreadLaunchInput {
   };
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
+  readonly createdByUserId?: string;
+  readonly createdByName?: string;
 }
 
 /** What workspace preparation reads from a launch; a retry rebuilds it from the run. */
@@ -705,7 +707,6 @@ const make = Effect.gen(function* () {
           (yield* ids.allocate
             .thread({ projectId: input.projectId })
             .pipe(Effect.mapError(mapError(input, "create-thread"))));
-
         if (reusableLaunchReceipt !== undefined) {
           const shell = yield* threads
             .getThreadShell(candidateThreadId)
@@ -771,6 +772,12 @@ const make = Effect.gen(function* () {
                   : { importedNativeThread: input.importedNativeThread }),
                 createdBy: input.createdBy,
                 creationSource: input.creationSource,
+                ...(input.createdByUserId === undefined
+                  ? {}
+                  : { createdByUserId: input.createdByUserId }),
+                ...(input.createdByName === undefined
+                  ? {}
+                  : { createdByName: input.createdByName }),
               });
         const claimed = yield* claimDispatch.pipe(
           Effect.mapError(
@@ -819,6 +826,10 @@ const make = Effect.gen(function* () {
               dispatchMode: { type: "defer_start", workspaceStrategy },
               createdBy: input.createdBy,
               creationSource: input.creationSource,
+              ...(input.createdByUserId === undefined
+                ? {}
+                : { createdByUserId: input.createdByUserId }),
+              ...(input.createdByName === undefined ? {} : { createdByName: input.createdByName }),
             })
             .pipe(Effect.mapError(mapError(input, "dispatch-message", threadId)));
           const runCreated = dispatched.storedEvents.find(

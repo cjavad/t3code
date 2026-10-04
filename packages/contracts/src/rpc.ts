@@ -125,6 +125,12 @@ import {
   VcsStatusStreamEvent,
 } from "./git.ts";
 import {
+  GitIdentityError,
+  GitIdentityProfile,
+  GitIdentityUpdateInput,
+  GitIdentityUser,
+} from "./gitIdentity.ts";
+import {
   ReviewDiffFileContentsInput,
   ReviewDiffFileContentsResult,
   ReviewDiffPreviewError,
@@ -392,6 +398,9 @@ export const WS_METHODS = {
 
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
+  gitIdentityGet: "git.identity.get",
+  gitIdentityUpdate: "git.identity.update",
+  gitIdentityUsers: "git.identity.users",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
@@ -1264,8 +1273,27 @@ const WsWorktreeSetupCancelRpc = Rpc.make(WS_METHODS.worktreeSetupCancel, {
 const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
   payload: GitRunStackedActionInput,
   success: GitActionProgressEvent,
-  error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
+  error: Schema.Union([GitManagerServiceError, GitIdentityError, EnvironmentAuthorizationError]),
   stream: true,
+});
+
+const WsGitIdentityGetRpc = Rpc.make(WS_METHODS.gitIdentityGet, {
+  payload: Schema.Struct({}),
+  success: Schema.NullOr(GitIdentityProfile),
+  error: Schema.Union([GitIdentityError, EnvironmentAuthorizationError]),
+});
+
+const WsGitIdentityUpdateRpc = Rpc.make(WS_METHODS.gitIdentityUpdate, {
+  payload: GitIdentityUpdateInput,
+  success: GitIdentityProfile,
+  error: Schema.Union([GitIdentityError, EnvironmentAuthorizationError]),
+});
+
+/** Everyone a thread's Git identity can be assigned to. */
+const WsGitIdentityUsersRpc = Rpc.make(WS_METHODS.gitIdentityUsers, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(GitIdentityUser),
+  error: Schema.Union([GitIdentityError, EnvironmentAuthorizationError]),
 });
 
 const WsGitResolvePullRequestRpc = Rpc.make(WS_METHODS.gitResolvePullRequest, {
@@ -1817,6 +1845,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
+  WsGitIdentityGetRpc,
+  WsGitIdentityUpdateRpc,
+  WsGitIdentityUsersRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,

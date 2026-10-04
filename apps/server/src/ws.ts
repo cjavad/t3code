@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
+import * as Redacted from "effect/Redacted";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
@@ -41,6 +42,9 @@ import {
   type OrchestrationV2Command,
   type GitActionProgressEvent,
   type GitManagerServiceError,
+  AuthAccessWriteScope,
+  AuthCloudConnectUnassignedSubject,
+  GitIdentityError,
   type MessageId,
   type AcpRegistryImportSessionInput,
   type AcpRegistryDeleteSessionInput,
@@ -207,6 +211,10 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import * as GitIdentityService from "./auth/GitIdentityService.ts";
+import * as AuthUsers from "./persistence/AuthUsers.ts";
+import { makeGitExecutionEnvironment } from "./auth/GitExecutionEnvironment.ts";
+import * as McpProviderSession from "./mcp/McpProviderSession.ts";
 import {
   requiredScopeForDeviceList,
   rpcAuthorizationError,
@@ -1184,6 +1192,19 @@ const makeWsRpcLayer = (
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
+      const authUsers = yield* AuthUsers.AuthUserRepository;
+      // A T3 Connect device nobody has claimed authenticates as the shared
+      // connect subject, which stands for a machine rather than a person. It
+      // gets no user row and its messages carry no author, so a thread cannot
+      // end up claiming "whichever laptop spoke first" as the identity its
+      // agents commit under.
+      const currentUser =
+        currentSession.subject === AuthCloudConnectUnassignedSubject
+          ? null
+          : yield* authUsers.ensureForSubject({
+              subject: currentSession.subject,
+              now: DateTime.formatIso(yield* DateTime.now),
+            });
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
       const intakeContext = yield* Effect.context<
@@ -1251,6 +1272,8 @@ const makeWsRpcLayer = (
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+      const gitIdentity = yield* GitIdentityService.GitIdentityService;
+      const config = yield* ServerConfig.ServerConfig;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -1268,7 +1291,6 @@ const makeWsRpcLayer = (
       const providerAuth = yield* ProviderAuthService.ProviderAuthService;
       const providerInstallation = yield* makeProviderInstallation();
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
-      const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -1482,6 +1504,9 @@ const makeWsRpcLayer = (
                   },
                   createdBy: "user",
                   creationSource: "web",
+                  ...(currentUser === null
+                    ? {}
+                    : { createdByUserId: currentUser.id, createdByName: currentUser.displayName }),
                 }),
               ),
             );
@@ -1794,34 +1819,67 @@ const makeWsRpcLayer = (
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
-            startup
-              .enqueueCommand(
-                // A retry also restarts the preparation work the launch owns.
-                (command.type === "prepared-run.retry"
-                  ? threadLaunch.retryPreparation(command)
-                  : ThreadMessageIntake.dispatchCommand(
-                      ThreadManagementService.withCreationProvenance(command, {
-                        createdBy: "user",
-                        creationSource:
-                          "creationSource" in command ? command.creationSource : "web",
-                      }),
-                    )
-                ).pipe(Effect.provide(intakeContext)),
-              )
-              .pipe(
-                Effect.tap(() => recordClientCommandAnalytics(command)),
-                Effect.map((result) => ({ sequence: result.sequence })),
-                Effect.mapError((cause) => {
-                  const detail = userFacingDispatchErrorMessage(cause);
-                  return new OrchestrationV2DispatchCommandError({
-                    commandId: command.commandId,
-                    commandType: command.type,
-                    message: detail ?? "Failed to dispatch orchestration V2 command",
-                    ...(detail === undefined ? {} : { detail }),
-                    cause,
-                  });
-                }),
-              ),
+            Effect.gen(function* () {
+              // Assigning a thread to somebody else hands their signing key and
+              // GitHub token to every agent that runs in it, so it takes the
+              // same scope that gates pairing and session management. Assigning
+              // yourself never does.
+              if (
+                command.type === "thread.metadata.update" &&
+                command.gitIdentityUserId != null &&
+                command.gitIdentityUserId !== currentUser?.id &&
+                !currentSession.scopes.includes(AuthAccessWriteScope)
+              ) {
+                return yield* new OrchestrationV2DispatchCommandError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  message:
+                    "Assigning a thread to another user's Git identity requires access management permission.",
+                });
+              }
+              const provenanced =
+                command.type === "thread.metadata.update" && command.gitIdentityUserId !== undefined
+                  ? {
+                      ...command,
+                      ...(currentUser === null
+                        ? {}
+                        : { gitIdentityAssignedByUserId: currentUser.id }),
+                    }
+                  : command;
+              return yield* startup
+                .enqueueCommand(
+                  (command.type === "prepared-run.retry"
+                    ? threadLaunch.retryPreparation(command)
+                    : ThreadMessageIntake.dispatchCommand(
+                        ThreadManagementService.withCreationProvenance(provenanced, {
+                          createdBy: "user",
+                          creationSource:
+                            "creationSource" in command ? command.creationSource : "web",
+                          ...(currentUser === null
+                            ? {}
+                            : {
+                                createdByUserId: currentUser.id,
+                                createdByName: currentUser.displayName,
+                              }),
+                        }),
+                      )
+                  ).pipe(Effect.provide(intakeContext)),
+                )
+                .pipe(
+                  Effect.tap(() => recordClientCommandAnalytics(command)),
+                  Effect.map((result) => ({ sequence: result.sequence })),
+                  Effect.mapError((cause) => {
+                    const detail = userFacingDispatchErrorMessage(cause);
+                    return new OrchestrationV2DispatchCommandError({
+                      commandId: command.commandId,
+                      commandType: command.type,
+                      message: detail ?? "Failed to dispatch orchestration V2 command",
+                      ...(detail === undefined ? {} : { detail }),
+                      cause,
+                    });
+                  }),
+                );
+            }),
             {
               "rpc.aggregate": "orchestrationV2",
               "orchestration_v2.command_id": command.commandId,
@@ -1978,6 +2036,9 @@ const makeWsRpcLayer = (
                       }),
                   createdBy: "user",
                   creationSource: input.creationSource ?? "web",
+                  ...(currentUser === null
+                    ? {}
+                    : { createdByUserId: currentUser.id, createdByName: currentUser.displayName }),
                 }).pipe(Effect.provide(intakeContext)),
               )
               .pipe(
@@ -3302,15 +3363,48 @@ const makeWsRpcLayer = (
         [WS_METHODS.gitRunStackedAction]: (input) =>
           observeRpcStream(
             WS_METHODS.gitRunStackedAction,
-            Stream.callback<GitActionProgressEvent, GitManagerServiceError>((queue) =>
-              gitWorkflow
-                .runStackedAction(input, {
-                  actionId: input.actionId,
-                  progressReporter: {
-                    publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
-                  },
-                })
-                .pipe(
+            Stream.callback<GitActionProgressEvent, GitManagerServiceError | GitIdentityError>(
+              (queue) =>
+                Effect.gen(function* () {
+                  const createsCommit =
+                    input.action === "commit" ||
+                    input.action === "commit_push" ||
+                    input.action === "commit_push_pr";
+                  const identity = createsCommit
+                    ? yield* gitIdentity.resolveCommitIdentity(currentSession.subject)
+                    : undefined;
+                  const githubToken =
+                    input.action === "create_pr" || input.action === "commit_push_pr"
+                      ? yield* gitIdentity.resolveGitHubToken(currentSession.subject)
+                      : null;
+                  if (
+                    (input.action === "create_pr" || input.action === "commit_push_pr") &&
+                    githubToken === null
+                  ) {
+                    return yield* new GitIdentityError({
+                      reason: "not_configured",
+                      detail: "Configure a GitHub token before creating a pull request.",
+                    });
+                  }
+                  const action = gitWorkflow.runStackedAction(input, {
+                    actionId: input.actionId,
+                    ...(identity ? { identity } : {}),
+                    progressReporter: {
+                      publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
+                    },
+                  });
+                  return yield* githubToken === null
+                    ? action
+                    : action.pipe(
+                        Effect.provideService(GitHubCli.PinnedGitHubCredential, {
+                          host: "github.com",
+                          token: githubToken,
+                          credentialFingerprint: NodeCrypto.createHash("sha256")
+                            .update(Redacted.value(githubToken), "utf8")
+                            .digest("hex"),
+                        }),
+                      );
+                }).pipe(
                   Effect.matchCauseEffect({
                     onFailure: (cause) => Queue.failCause(queue, cause),
                     onSuccess: (result) =>
@@ -3357,6 +3451,52 @@ const makeWsRpcLayer = (
             gitWorkflow
               .preparePullRequestThread(input)
               .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitIdentityGet]: (_input) =>
+          observeRpcEffect(WS_METHODS.gitIdentityGet, gitIdentity.get(currentSession.subject), {
+            "rpc.aggregate": "git",
+          }),
+        [WS_METHODS.gitIdentityUpdate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitIdentityUpdate,
+            gitIdentity.update(currentSession.subject, input),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitIdentityUsers]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.gitIdentityUsers,
+            Effect.gen(function* () {
+              const users = yield* authUsers.list().pipe(
+                Effect.catch((cause) =>
+                  Effect.logError("auth users could not be listed", { cause }).pipe(
+                    Effect.andThen(
+                      new GitIdentityError({
+                        reason: "storage",
+                        detail: "The list of users could not be read.",
+                      }),
+                    ),
+                  ),
+                ),
+              );
+              // The connect subject is a machine, not a colleague: it can never
+              // hold a Git identity, so offering it as a commit author would
+              // only be a way to make commits fail.
+              const people = users.filter(
+                (user) => user.subject !== AuthCloudConnectUnassignedSubject,
+              );
+              return yield* Effect.forEach(people, (user) =>
+                gitIdentity.get(user.subject).pipe(
+                  Effect.orElseSucceed(() => null),
+                  Effect.map((profile) => ({
+                    userId: user.id,
+                    displayName: user.displayName,
+                    githubUsername: profile?.githubUsername ?? null,
+                    identityConfigured: profile !== null,
+                  })),
+                ),
+              );
+            }),
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.vcsListRefs]: (input) =>

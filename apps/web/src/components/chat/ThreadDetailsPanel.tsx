@@ -26,6 +26,7 @@ import type { ComponentProps } from "react";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { ThreadGitIdentityControl } from "./ThreadGitIdentityControl";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 
@@ -161,6 +162,13 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   {...(canPickEnvironment
                     ? { onEnvironmentChange: props.onEnvironmentChange }
                     : {})}
+                />
+              ) : null}
+
+              {!props.draftId ? (
+                <ThreadGitIdentityControl
+                  environmentId={props.environmentId}
+                  threadId={props.threadId}
                 />
               ) : null}
 
