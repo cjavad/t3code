@@ -285,6 +285,7 @@ it.effect("keeps other database work runnable while discovering compaction candi
         receipts: yield* Deferred.make<void>(),
       };
       const queries = { events: 0, receipts: 0 };
+      const eventDiscoveryQueries: string[] = [];
       let finished = false;
       const tracer = Tracer.make({
         span(options) {
@@ -301,6 +302,7 @@ it.effect("keeps other database work runnable while discovering compaction candi
                 ? "events"
                 : undefined;
             if (table === undefined) return;
+            if (table === "events") eventDiscoveryQueries.push(query);
             queries[table] += 1;
             Deferred.doneUnsafe(discoveryStarted[table], Effect.void);
           };
@@ -328,6 +330,11 @@ it.effect("keeps other database work runnable while discovering compaction candi
       );
       assert.equal(summary.deletedEventCount, 0);
       assert.equal(summary.deletedReceiptCount, 0);
+      assert.isNotEmpty(eventDiscoveryQueries);
+      for (const query of eventDiscoveryQueries) {
+        assert.include(query, "INDEXED BY idx_orchestration_events_application_sequence");
+        assert.match(query, /WHERE event\.application_event_version =/);
+      }
       for (const probe of probes) {
         const result = yield* Fiber.join(probe);
         assert.isFalse(result.finished);

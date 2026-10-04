@@ -247,23 +247,27 @@ export const layer: Layer.Layer<
           COALESCE((SELECT MAX(sequence) FROM orchestration_events), 0) AS event_sequence,
           COALESCE((SELECT MAX(rowid) FROM orchestration_command_receipts), 0) AS receipt_row_id
       `;
-      let throughSequence = bounds[0]?.event_sequence ?? 0;
+      const eventHighWater = bounds[0]?.event_sequence ?? 0;
       let throughReceiptRowId = bounds[0]?.receipt_row_id ?? 0;
       const retainedThreadIds = new Set<string>();
       const retainedEntityKeys = new Set<string>();
       let deletedEventCount = 0;
       let deletedReceiptCount = 0;
 
-      while (throughSequence > 0) {
-        const rows = yield* sql<{
-          readonly sequence: number;
-          readonly application_event_version: number;
-          readonly aggregate_kind: string;
-          readonly stream_id: string;
-          readonly event_type: string;
-          readonly entity_id: string | null;
-          readonly imported_legacy_thread: number;
-        }>`
+      // The version/sequence index stores the appended version column without
+      // walking large payload overflow chains for events that are retained.
+      for (const applicationVersion of [2, 1]) {
+        let throughSequence = eventHighWater;
+        while (throughSequence > 0) {
+          const rows = yield* sql<{
+            readonly sequence: number;
+            readonly application_event_version: number;
+            readonly aggregate_kind: string;
+            readonly stream_id: string;
+            readonly event_type: string;
+            readonly entity_id: string | null;
+            readonly imported_legacy_thread: number;
+          }>`
           SELECT
             event.sequence,
             event.application_event_version,
@@ -285,39 +289,44 @@ export const layer: Layer.Layer<
               )
               ELSE 0
             END AS imported_legacy_thread
-          FROM orchestration_events AS event
-          WHERE event.sequence <= ${throughSequence}
+          FROM orchestration_events AS event INDEXED BY idx_orchestration_events_application_sequence
+          WHERE event.application_event_version = ${applicationVersion}
+            AND event.sequence <= ${throughSequence}
           ORDER BY event.sequence DESC
           LIMIT ${COMPACTION_PAGE_SIZE}
         `;
-        const obsolete: number[] = [];
-        for (const row of rows) {
-          if (row.imported_legacy_thread === 1) {
-            obsolete.push(row.sequence);
-          } else if (row.application_event_version === 2) {
-            if (
-              row.aggregate_kind === "thread" &&
-              supersedableThreadEventTypes.has(row.event_type)
-            ) {
-              if (retainedThreadIds.has(row.stream_id)) obsolete.push(row.sequence);
-              else retainedThreadIds.add(row.stream_id);
-            } else if (row.event_type === "message.updated" || row.event_type === "node.updated") {
-              const key = encodeEntityKey([row.event_type, row.stream_id, row.entity_id]);
-              if (retainedEntityKeys.has(key)) obsolete.push(row.sequence);
-              else retainedEntityKeys.add(key);
+          const obsolete: number[] = [];
+          for (const row of rows) {
+            if (row.imported_legacy_thread === 1) {
+              obsolete.push(row.sequence);
+            } else if (row.application_event_version === 2) {
+              if (
+                row.aggregate_kind === "thread" &&
+                supersedableThreadEventTypes.has(row.event_type)
+              ) {
+                if (retainedThreadIds.has(row.stream_id)) obsolete.push(row.sequence);
+                else retainedThreadIds.add(row.stream_id);
+              } else if (
+                row.event_type === "message.updated" ||
+                row.event_type === "node.updated"
+              ) {
+                const key = encodeEntityKey([row.event_type, row.stream_id, row.entity_id]);
+                if (retainedEntityKeys.has(key)) obsolete.push(row.sequence);
+                else retainedEntityKeys.add(key);
+              }
             }
           }
-        }
-        // Both discovery and deletion use the synchronous connection. Yield even
-        // when this page has nothing to delete so startup and requests can progress.
-        yield* Effect.yieldNow;
-        if (obsolete.length > 0) {
-          yield* sql`DELETE FROM orchestration_events WHERE sequence IN ${sql.in(obsolete)}`;
-          deletedEventCount += obsolete.length;
+          // Both discovery and deletion use the synchronous connection. Yield even
+          // when this page has nothing to delete so startup and requests can progress.
           yield* Effect.yieldNow;
+          if (obsolete.length > 0) {
+            yield* sql`DELETE FROM orchestration_events WHERE sequence IN ${sql.in(obsolete)}`;
+            deletedEventCount += obsolete.length;
+            yield* Effect.yieldNow;
+          }
+          throughSequence = (rows.at(-1)?.sequence ?? 1) - 1;
+          if (rows.length < COMPACTION_PAGE_SIZE) break;
         }
-        throughSequence = (rows.at(-1)?.sequence ?? 1) - 1;
-        if (rows.length < COMPACTION_PAGE_SIZE) break;
       }
 
       // Legacy receipts are removable only after their thread's v1 import finishes.
