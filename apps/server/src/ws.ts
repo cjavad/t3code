@@ -1,11 +1,11 @@
+import * as NodeCrypto from "node:crypto";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
-import * as NodeCrypto from "node:crypto";
 
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
-import * as Encoding from "effect/Encoding";
+import * as Base64 from "effect/encoding/Base64";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -28,7 +28,9 @@ import {
   CommandId,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
+  AuthOrchestrationOperateScope,
   type AuthEnvironmentScope,
+  type ScheduledTaskListResult,
   AuthSessionId,
   ClientConnectionMethod,
   ClientDeviceType,
@@ -109,8 +111,8 @@ import {
   HttpServerRequest,
   HttpServerRespondable,
   HttpServerResponse,
-} from "effect/unstable/http";
-import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+} from "effect/http";
+import { RpcSerialization, RpcServer } from "effect/rpc";
 
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as ServerConfig from "./config.ts";
@@ -123,6 +125,7 @@ import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as IdAllocator from "./orchestration-v2/IdAllocator.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
+import * as SecretRequests from "./secrets/SecretRequests.ts";
 import {
   archivedShellStreamItemFromThreadShell,
   buildActiveShellSnapshot,
@@ -134,6 +137,7 @@ import {
   shellStreamItemFromThreadShell,
   shellStreamItemsFromInitialSnapshot,
   shellStreamItemsFromResumeSnapshot,
+  skipUnchangedThreadShells,
   toShellApplicationEvent,
   type ShellApplicationEvent,
 } from "./orchestration-v2/ShellStream.ts";
@@ -158,21 +162,21 @@ import {
 } from "./orchestration-v2/WireProjection.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
-import * as OrchestrationEventStore from "./persistence/Services/OrchestrationEventStore.ts";
+import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
 import { userFacingDispatchErrorMessage } from "./orchestration-v2/UserFacingErrors.ts";
 import {
   observeRpcEffect,
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
-import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
-import * as ProviderInstanceRegistry from "./provider/Services/ProviderInstanceRegistry.ts";
+import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
+import * as ProviderInstanceRegistry from "./provider/ProviderInstanceRegistry.ts";
 import * as AcpRegistrySupport from "./provider/acp/AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./provider/acp/AcpRegistryRuntimeCoordinator.ts";
 import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as ProviderMaintenance from "./provider/providerMaintenance.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
-import * as ProviderAuthService from "./provider/Services/ProviderAuthService.ts";
+import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -208,6 +212,7 @@ import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
+import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
@@ -215,11 +220,8 @@ import * as GitIdentityService from "./auth/GitIdentityService.ts";
 import * as AuthUsers from "./persistence/AuthUsers.ts";
 import { makeGitExecutionEnvironment } from "./auth/GitExecutionEnvironment.ts";
 import * as McpProviderSession from "./mcp/McpProviderSession.ts";
-import {
-  requiredScopeForDeviceList,
-  rpcAuthorizationError,
-  rpcScopeAuthorizationLayer,
-} from "./auth/RpcAuthorization.ts";
+import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAuthorization.ts";
+import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
@@ -230,7 +232,7 @@ import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
 import { pullRequestSyncKey } from "./pullRequest/pullRequestSyncKey.ts";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
@@ -390,7 +392,7 @@ const persistChatAttachments = Effect.fn("ws.assets.persistChatAttachments")(fun
           message: `Attachment ${attachment.name} has an invalid image payload.`,
         });
       }
-      const bytes = yield* Effect.fromResult(Encoding.decodeBase64(parsed.base64)).pipe(
+      const bytes = yield* Effect.fromResult(Base64.decode(parsed.base64)).pipe(
         Effect.mapError(
           (cause) =>
             new PersistChatAttachmentsError({
@@ -1035,6 +1037,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
         Stream.groupedWithin(512, Duration.millis(50)),
         Stream.mapEffect((events) => projectShellItems(Array.from(events))),
         Stream.flatMap(Stream.fromIterable),
+        skipUnchangedThreadShells,
       );
 
     const liveFrom = (afterSequence: number) =>
@@ -1183,7 +1186,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
   },
 );
 
-const makeWsRpcLayer = (
+const layerWsRpc = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   clientOrigin: OrchestrationClientOrigin,
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
@@ -1236,6 +1239,7 @@ const makeWsRpcLayer = (
       const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
       const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
+      const secretRequests = yield* SecretRequests.SecretRequests;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
@@ -1271,6 +1275,7 @@ const makeWsRpcLayer = (
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
+      const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const gitIdentity = yield* GitIdentityService.GitIdentityService;
       const config = yield* ServerConfig.ServerConfig;
@@ -1335,6 +1340,14 @@ const makeWsRpcLayer = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const relayClient = yield* RelayClient.RelayClient;
+      // A webhook URL starts agent runs, so only sessions that may operate
+      // see it; read-only sessions still see the task itself.
+      const withVisibleWebhookUrls = (result: ScheduledTaskListResult): ScheduledTaskListResult =>
+        currentSession.scopes.includes(AuthOrchestrationOperateScope)
+          ? result
+          : {
+              tasks: result.tasks.map(({ webhook: _webhook, ...task }) => task),
+            };
       // RpcScopeAuthorization checks each RPC's declared scope before its handler
       // runs. This covers the one RPC whose scope depends on its input.
       const authorizeEffect = <A, E, R>(
@@ -1478,7 +1491,7 @@ const makeWsRpcLayer = (
               provider?.models.find((candidate) => candidate.isDefault)?.slug ??
               provider?.models[0]?.slug ??
               "default";
-            const commandId = CommandId.make(NodeCrypto.randomUUID());
+            const commandId = CommandId.make(yield* crypto.randomUUIDv4.pipe(Effect.orDie));
             const launched = yield* Effect.result(
               startup.enqueueCommand(
                 threadLaunch.launch({
@@ -1714,6 +1727,7 @@ const makeWsRpcLayer = (
             remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
               remoteOpenTargets.resolveTargets(),
             ),
+            directEndpoints: yield* resolveAvailableEditorsForConfig(directEndpoints.resolve()),
             observability: {
               logsDirectoryPath: config.logsDir,
               localTracingEnabled: true,
@@ -2112,13 +2126,17 @@ const makeWsRpcLayer = (
             },
           ),
         [WS_METHODS.scheduledTasksList]: (_input) =>
-          observeRpcEffect(WS_METHODS.scheduledTasksList, scheduledTasks.list(), {
-            "rpc.aggregate": "scheduledTasks",
-          }),
+          observeRpcEffect(
+            WS_METHODS.scheduledTasksList,
+            scheduledTasks.list().pipe(Effect.map(withVisibleWebhookUrls)),
+            { "rpc.aggregate": "scheduledTasks" },
+          ),
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
-          observeRpcStream(WS_METHODS.scheduledTasksSubscribe, scheduledTasks.subscribeList(), {
-            "rpc.aggregate": "scheduledTasks",
-          }),
+          observeRpcStream(
+            WS_METHODS.scheduledTasksSubscribe,
+            scheduledTasks.subscribeList().pipe(Stream.map(withVisibleWebhookUrls)),
+            { "rpc.aggregate": "scheduledTasks" },
+          ),
         [WS_METHODS.scheduledTasksUpsert]: (input) =>
           observeRpcEffect(WS_METHODS.scheduledTasksUpsert, scheduledTasks.upsert(input), {
             "rpc.aggregate": "scheduledTasks",
@@ -2138,6 +2156,29 @@ const makeWsRpcLayer = (
             "rpc.aggregate": "scheduledTasks",
             "scheduled_task.id": input.id,
           }),
+        [WS_METHODS.scheduledTasksRotateWebhookToken]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.scheduledTasksRotateWebhookToken,
+            scheduledTasks.rotateWebhookToken(input),
+            { "rpc.aggregate": "scheduledTasks", "scheduled_task.id": input.id },
+          ),
+        [WS_METHODS.secretsAnswerRequest]: (input) =>
+          observeRpcEffect(WS_METHODS.secretsAnswerRequest, secretRequests.answer(input), {
+            "rpc.aggregate": "secrets",
+            "orchestration_v2.thread_id": input.threadId,
+          }),
+        [WS_METHODS.scheduledTasksListWebhookDeliveries]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.scheduledTasksListWebhookDeliveries,
+            scheduledTasks.listWebhookDeliveries(input),
+            { "rpc.aggregate": "scheduledTasks", "scheduled_task.id": input.id },
+          ),
+        [WS_METHODS.scheduledTasksGetWebhookDelivery]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.scheduledTasksGetWebhookDelivery,
+            scheduledTasks.getWebhookDelivery(input),
+            { "rpc.aggregate": "scheduledTasks", "scheduled_task.id": input.id },
+          ),
         [WS_METHODS.serverProbe]: (_input) =>
           observeRpcEffect(WS_METHODS.serverProbe, Effect.succeed({}), {
             "rpc.aggregate": "server",
@@ -2172,36 +2213,9 @@ const makeWsRpcLayer = (
         [WS_METHODS.serverUninstallAcpRegistryManagedBinary]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverUninstallAcpRegistryManagedBinary,
-            serverSettings
-              .withSettingsSnapshot((settings) =>
-                acpRegistryCatalog.uninstallManagedBinary(
-                  input,
-                  Effect.succeed(
-                    Object.values(settings.providerInstances).some((instance) => {
-                      if (
-                        instance.driver !== "acpRegistry" ||
-                        instance.config === null ||
-                        typeof instance.config !== "object"
-                      ) {
-                        return false;
-                      }
-                      return (instance.config as Record<string, unknown>).agentId === input.agentId;
-                    }),
-                  ),
-                ),
-              )
-              .pipe(
-                Effect.mapError((cause) =>
-                  AcpRegistrySupport.isAcpRegistryError(cause)
-                    ? cause
-                    : new AcpRegistrySupport.AcpRegistryError({
-                        reason: "install_failed",
-                        detail: `Could not read provider settings while checking references for ACP Registry agent ${input.agentId}.`,
-                        cause,
-                      }),
-                ),
-                Effect.mapError(AcpRegistrySupport.toAcpRegistryOperationError),
-              ),
+            acpRegistryCatalog
+              .uninstallManagedBinary(input)
+              .pipe(Effect.mapError(AcpRegistrySupport.toAcpRegistryOperationError)),
             {
               "rpc.aggregate": "server",
               "acp_registry.agent_id": input.agentId,
@@ -2744,15 +2758,16 @@ const makeWsRpcLayer = (
                         status,
                       }),
                     ),
-                    Effect.catchTag("RelayClientInstallError", (error) =>
-                      Queue.fail(
-                        queue,
-                        new RelayClientInstallFailedError({
-                          reason: error.reason,
-                          message: error.message,
-                        }),
-                      ),
-                    ),
+                    Effect.catchTags({
+                      RelayClientInstallError: (error) =>
+                        Queue.fail(
+                          queue,
+                          new RelayClientInstallFailedError({
+                            reason: error.reason,
+                            message: error.message,
+                          }),
+                        ),
+                    }),
                     Effect.andThen(Queue.end(queue)),
                     Effect.forkScoped,
                   ),
@@ -3233,6 +3248,7 @@ const makeWsRpcLayer = (
               if (
                 input.resource._tag === "attachment" ||
                 input.resource._tag === "native-app-icon" ||
+                input.resource._tag === "tool-output-image" ||
                 // GitHub media names the repository it authenticates through itself.
                 input.resource._tag === "github-media" ||
                 (input.resource._tag === "media-file" && path.isAbsolute(input.resource.path))
@@ -3918,7 +3934,7 @@ const makeWsRpcLayer = (
     }),
   );
 
-export const websocketRpcRouteLayer = Layer.unwrap(
+export const layer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
@@ -3962,19 +3978,14 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
           yield* RpcServer.make(ServerWsRpcGroup, { disableTracing: true }).pipe(
             Effect.provideService(RpcServer.Protocol, withTerminalOutputWindow(protocol)),
-            Effect.provide(rpcScopeAuthorizationLayer(session.scopes)),
+            Effect.provide(RpcAuthorization.layer(session.scopes)),
             Effect.forkScoped,
           );
           // @effect-diagnostics-next-line returnEffectInGen:off
           return httpEffect;
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(
-              session,
-              clientOrigin,
-              clientAnalyticsProps,
-              previewAutomationBroker,
-            ).pipe(
+            layerWsRpc(session, clientOrigin, clientAnalyticsProps, previewAutomationBroker).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
               Layer.provide(AgentSessionScanner.layer),

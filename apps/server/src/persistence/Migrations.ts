@@ -8,9 +8,9 @@
  * schema is always up to date before the application starts.
  */
 
-import * as Migrator from "effect/unstable/sql/Migrator";
+import * as Migrator from "effect/sql/Migrator";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
 import { reconcileRenumberedProjectionMigrations } from "./reconcileRenumberedProjectionMigrations.ts";
 
@@ -71,6 +71,8 @@ import Migration0053 from "./Migrations/053_PullRequestFilesViewed.ts";
 import Migration0054 from "./Migrations/054_ProjectionThreadsAutoSettleDisabledAt.ts";
 import Migration0055 from "./Migrations/055_OrchestrationV2.ts";
 import Migration0056 from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
+import Migration0057 from "./Migrations/057_ScheduledTaskWebhooks.ts";
+import Migration0058 from "./Migrations/058_WebhookRelayDeliveries.ts";
 import Migration0063 from "./Migrations/063_AuthUsers.ts";
 import Migration0064 from "./Migrations/064_AuthCloudDevices.ts";
 
@@ -143,6 +145,8 @@ export const migrationEntries = [
   // Preserve this migration's schema. Future V2 schema changes need new migrations.
   [55, "OrchestrationV2", Migration0055],
   [56, "RemoveRedundantProjectionIndexes", Migration0056],
+  [57, "ScheduledTaskWebhooks", Migration0057],
+  [58, "WebhookRelayDeliveries", Migration0058],
   [63, "AuthUsers", Migration0063],
   [64, "AuthCloudDevices", Migration0064],
 ] as const;
@@ -178,6 +182,62 @@ export interface RunMigrationsOptions {
  *
  * @returns Effect containing array of executed migrations
  */
+// Released fork builds recorded 63/64 before upstream introduced 57/58.
+// Migrator uses the highest id, so fill only this known gap transactionally.
+const reconcileForkMigrationGap = Effect.fn("reconcileForkMigrationGap")(function* (
+  throughId?: number,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  return yield* sql.withTransaction(
+    Effect.gen(function* () {
+      const tables =
+        yield* sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'`;
+      if (tables.length === 0) return [];
+      const history = yield* sql<{
+        migration_id: number;
+        name: string;
+      }>`SELECT migration_id, name FROM effect_sql_migrations`;
+      if (
+        !history.some(
+          (row) =>
+            (row.migration_id === 63 && row.name === "AuthUsers") ||
+            (row.migration_id === 64 && row.name === "AuthCloudDevices"),
+        )
+      )
+        return [];
+      const executed: Array<readonly [number, string]> = [];
+      for (const [id, name, migration] of [
+        [57, "ScheduledTaskWebhooks", Migration0057],
+        [58, "WebhookRelayDeliveries", Migration0058],
+      ] as const) {
+        if (id < 57 || id >= 63 || (throughId !== undefined && id > throughId)) continue;
+        const recorded = history.find((row) => row.migration_id === id);
+        if (recorded) {
+          if (recorded.name !== name)
+            return yield* new Migrator.MigrationError({
+              kind: "BadState",
+              message: `Unexpected fork upgrade migration ${id}: ${recorded.name}`,
+            });
+          continue;
+        }
+        yield* migration.pipe(
+          Effect.mapError(
+            (cause) =>
+              new Migrator.MigrationError({
+                kind: "Failed",
+                message: `Fork upgrade migration ${id}_${name} failed`,
+                cause,
+              }),
+          ),
+        );
+        yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (${id}, ${name})`;
+        executed.push([id, name]);
+      }
+      return executed;
+    }),
+  );
+});
+
 export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
@@ -190,6 +250,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
       : [];
   const executedMigrations = [
     ...previewMigrations,
+    ...(yield* reconcileForkMigrationGap(toMigrationInclusive)),
     ...(yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })),
   ];
   const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);

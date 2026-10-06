@@ -5,12 +5,12 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as PersistenceErrors from "../persistence/Errors.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as PairingGrantStore from "./PairingGrantStore.ts";
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
 
@@ -22,7 +22,7 @@ const TEST_SERVER_PORT = 13_773;
 const isPairingCredentialIssueError = Schema.is(PairingGrantStore.PairingCredentialIssueError);
 const isPersistenceSqlError = Schema.is(PersistenceErrors.PersistenceSqlError);
 
-const makeServerConfigLayer = (overrides?: Partial<ServerConfig.ServerConfig["Service"]>) =>
+const layerServerConfig = (overrides?: Partial<ServerConfig.ServerConfig["Service"]>) =>
   Layer.effect(
     ServerConfig.ServerConfig,
     Effect.gen(function* () {
@@ -37,12 +37,12 @@ const makeServerConfigLayer = (overrides?: Partial<ServerConfig.ServerConfig["Se
     }),
   ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-auth-server-test-" })));
 
-const makeEnvironmentAuthLayer = (overrides?: Partial<ServerConfig.ServerConfig["Service"]>) =>
+const layerEnvironmentAuth = (overrides?: Partial<ServerConfig.ServerConfig["Service"]>) =>
   EnvironmentAuth.layer.pipe(
-    Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provideMerge(SqlitePersistence.layerMemory),
     Layer.provide(ServerSecretStore.layer),
-    Layer.provide(ServerEnvironment.identityLayer),
-    Layer.provide(makeServerConfigLayer(overrides)),
+    Layer.provide(ServerEnvironment.layerIdentity),
+    Layer.provide(layerServerConfig(overrides)),
   );
 
 const makeCookieRequest = (
@@ -105,7 +105,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       expect(authenticated.scopes).toEqual(["orchestration:read"]);
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthLayer({
+        layerEnvironmentAuth({
           mode: "web",
           devUrl: new URL("http://127.0.0.1:5173"),
           devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
@@ -141,7 +141,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       expect(error._tag).toBe("ServerAuthInvalidCredentialError");
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthLayer({
+        layerEnvironmentAuth({
           mode: "web",
           devUrl: new URL("http://127.0.0.1:5173"),
           devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
@@ -167,7 +167,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       }
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthLayer({
+        layerEnvironmentAuth({
           mode: "web",
           devUrl: new URL("http://127.0.0.1:5173"),
           devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
@@ -216,7 +216,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       expect((yield* sessions.verify(token)).subject).toBe("reusable-dev-token");
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthLayer({
+        layerEnvironmentAuth({
           mode: "web",
           devUrl: new URL("http://127.0.0.1:5173"),
           devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
@@ -244,7 +244,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       ).toMatchObject({ authenticated: true, scopes: AuthAdministrativeScopes });
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthLayer({
+        layerEnvironmentAuth({
           mode: "web",
           devUrl: new URL("http://127.0.0.1:5173"),
           devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
@@ -279,7 +279,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       }
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthLayer({
+        layerEnvironmentAuth({
           mode: "web",
           devUrl: new URL("http://127.0.0.1:5173"),
           devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
@@ -336,7 +336,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         "relay:read",
       ]);
       expect(verified.subject).toBe("one-time-token");
-    }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 
   it.effect("preserves an explicit pairing subject through browser session exchange", () =>
@@ -361,7 +361,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       );
 
       expect(verified.subject).toBe("johan");
-    }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 
   it.effect("prefers a bearer token over a stale legacy cookie", () =>
@@ -375,7 +375,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       } as never);
 
       expect(verified.sessionId).toBe(bearer.sessionId);
-    }).pipe(Effect.provide(makeEnvironmentAuthLayer({ mode: "web", host: "192.168.1.50" }))),
+    }).pipe(Effect.provide(layerEnvironmentAuth({ mode: "web", host: "192.168.1.50" }))),
   );
 
   it.effect("does not exchange ordinary pairing grants for administrative access tokens", () =>
@@ -392,7 +392,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         .pipe(Effect.flip);
 
       expect(error._tag).toBe("ServerAuthScopeNotGrantedError");
-    }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 
   it.effect("inherits a constrained pairing grant when token exchange omits scope", () =>
@@ -409,7 +409,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       );
 
       expect(token.scope).toBe("orchestration:read");
-    }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 
   it.effect("rotates desktop bearer sessions without accumulating authorized clients", () =>
@@ -470,7 +470,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       expect(active.map((entry) => entry.sessionId)).toContain(pairedSession.sessionId);
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthLayer({
+        layerEnvironmentAuth({
           desktopBootstrapToken: "desktop-bootstrap-token",
         }),
       ),
@@ -488,7 +488,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       expect(
         listedPairingLinks.find((pairingLink) => pairingLink.id === pairingCredential.id)?.subject,
       ).toBe("one-time-token");
-    }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 
   it.effect("issues startup pairing URLs that bootstrap administrative sessions", () =>
@@ -522,7 +522,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         "relay:write",
       ]);
       expect(verified.subject).toBe("administrative-bootstrap");
-    }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 
   it.effect(
@@ -591,7 +591,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         expect(clientsAfterRevoke[0]?.sessionId).toBe(administrativeSession.sessionId);
       }).pipe(
         Effect.provide(
-          makeEnvironmentAuthLayer({
+          layerEnvironmentAuth({
             desktopBootstrapToken: "desktop-bootstrap-token",
           }),
         ),
