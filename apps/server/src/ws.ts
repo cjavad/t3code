@@ -1,7 +1,4 @@
 import * as GitHubIdentity from "./auth/gitHubIdentity.ts";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
-// @effect-diagnostics nodeBuiltinImport:off - stable identity and credential keys use synchronous SHA-256.
-import * as NodeCrypto from "node:crypto";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
@@ -15,7 +12,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
-import * as Redacted from "effect/Redacted";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Result from "effect/Result";
@@ -1357,7 +1353,13 @@ const layerWsRpc = (
       );
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
-      const withPullRequestViewer = pullRequests.withRoutingCredential;
+      // Bind the person before verifying the page's expected GitHub account.
+      const withPullRequestViewer: PullRequestService.PullRequestService["Service"]["withRoutingCredential"] =
+        (input, operation) =>
+          githubIdentity.withSubject(
+            currentSession.subject,
+            pullRequests.withRoutingCredential(input, operation),
+          );
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
@@ -1782,8 +1784,8 @@ const layerWsRpc = (
         });
 
       const refreshGitStatus = (cwd: string) =>
-        vcsStatusBroadcaster
-          .refreshStatus(cwd)
+        githubIdentity
+          .withSubject(currentSession.subject, vcsStatusBroadcaster.refreshStatus(cwd))
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
       const getOrchestrationV2ArchivedShellSnapshot = Effect.gen(function* () {
@@ -2557,10 +2559,14 @@ const layerWsRpc = (
                 Effect.forkScoped,
               ),
           ),
-        [WS_METHODS.pullRequestsList]: (input) => pullRequests.list(input),
-        [WS_METHODS.pullRequestsListStats]: (input) => pullRequests.listStats(input),
-        [WS_METHODS.pullRequestsRoutingIdentity]: (input) => pullRequests.routingIdentity(input),
-        [WS_METHODS.pullRequestsRouting]: (input) => pullRequests.routing(input),
+        [WS_METHODS.pullRequestsList]: (input) =>
+          githubIdentity.withSubject(currentSession.subject, pullRequests.list(input)),
+        [WS_METHODS.pullRequestsListStats]: (input) =>
+          githubIdentity.withSubject(currentSession.subject, pullRequests.listStats(input)),
+        [WS_METHODS.pullRequestsRoutingIdentity]: (input) =>
+          githubIdentity.withSubject(currentSession.subject, pullRequests.routingIdentity(input)),
+        [WS_METHODS.pullRequestsRouting]: (input) =>
+          githubIdentity.withSubject(currentSession.subject, pullRequests.routing(input)),
         [WS_METHODS.pullRequestsSummary]: (input) =>
           withPullRequestViewer(input, pullRequests.summary(input)),
         [WS_METHODS.pullRequestsStack]: (input) =>
@@ -2644,42 +2650,51 @@ const layerWsRpc = (
         [WS_METHODS.pullRequestsSetLabels]: (input) =>
           withPullRequestViewer(input, pullRequests.setLabels(input)),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
-          sourceControlRepositories.lookupRepository(input),
+          githubIdentity.withSubject(
+            currentSession.subject,
+            sourceControlRepositories.lookupRepository(input),
+          ),
         [WS_METHODS.sourceControlCloneRepository]: (input) =>
-          sourceControlRepositories.cloneRepository(input),
+          githubIdentity.withSubject(
+            currentSession.subject,
+            sourceControlRepositories.cloneRepository(input),
+          ),
         [WS_METHODS.projectCloneStart]: (input) =>
-          projectCloneTracker.start(input, {
-            createProject: (project) =>
-              projectService
-                .create({
-                  commandId: CommandId.make(`project-clone-create:${project.projectId}`),
-                  projectId: project.projectId,
-                  title: project.title,
-                  workspaceRoot: project.workspaceRoot,
-                  createWorkspaceRootIfMissing: true,
-                })
-                .pipe(
-                  Effect.asVoid,
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationDispatchCommandError({
-                        message: "Failed to create clone project.",
-                        cause,
-                      }),
-                  ),
-                ),
-            onCloned: (project) =>
-              repositoryIdentityResolver.resolve(project.workspaceRoot, { refresh: true }).pipe(
-                Effect.andThen(
-                  projectService.update({
-                    commandId: CommandId.make(`project-clone-done:${project.projectId}`),
+          githubIdentity.withSubject(
+            currentSession.subject,
+            projectCloneTracker.start(input, {
+              createProject: (project) =>
+                projectService
+                  .create({
+                    commandId: CommandId.make(`project-clone-create:${project.projectId}`),
                     projectId: project.projectId,
-                  }),
+                    title: project.title,
+                    workspaceRoot: project.workspaceRoot,
+                    createWorkspaceRootIfMissing: true,
+                  })
+                  .pipe(
+                    Effect.asVoid,
+                    Effect.mapError(
+                      (cause) =>
+                        new OrchestrationDispatchCommandError({
+                          message: "Failed to create clone project.",
+                          cause,
+                        }),
+                    ),
+                  ),
+              onCloned: (project) =>
+                repositoryIdentityResolver.resolve(project.workspaceRoot, { refresh: true }).pipe(
+                  Effect.andThen(
+                    projectService.update({
+                      commandId: CommandId.make(`project-clone-done:${project.projectId}`),
+                      projectId: project.projectId,
+                    }),
+                  ),
+                  Effect.andThen(refreshGitStatus(project.workspaceRoot)),
+                  Effect.ignoreCause({ log: true }),
                 ),
-                Effect.andThen(refreshGitStatus(project.workspaceRoot)),
-                Effect.ignoreCause({ log: true }),
-              ),
-          }),
+            }),
+          ),
         [WS_METHODS.projectsEnsureScratch]: () =>
           managedFolders.ensureScratchProject.pipe(
             Effect.mapError(
@@ -2697,16 +2712,20 @@ const layerWsRpc = (
         [WS_METHODS.projectCloneCancel]: (input) =>
           projectCloneTracker.cancel(input.projectId).pipe(Effect.map((applied) => ({ applied }))),
         [WS_METHODS.projectCloneRetry]: (input) =>
-          projectCloneTracker.retry(input.projectId).pipe(Effect.map((applied) => ({ applied }))),
+          githubIdentity
+            .withSubject(currentSession.subject, projectCloneTracker.retry(input.projectId))
+            .pipe(Effect.map((applied) => ({ applied }))),
         [WS_METHODS.subscribeProjectClones]: () => projectCloneTracker.stream,
         [WS_METHODS.sourceControlPublishRepository]: (input) =>
-          sourceControlRepositories.publishRepository(input).pipe(
-            // A new remote can change the cached identity. Only the `cwd` entry
-            // refreshes, so after a publish from a linked worktree the project
-            // root entry waits for its TTL.
-            Effect.tap(() => repositoryIdentityResolver.resolve(input.cwd, { refresh: true })),
-            Effect.tap(() => refreshGitStatus(input.cwd)),
-          ),
+          githubIdentity
+            .withSubject(currentSession.subject, sourceControlRepositories.publishRepository(input))
+            .pipe(
+              // A new remote can change the cached identity. Only the `cwd` entry
+              // refreshes, so after a publish from a linked worktree the project
+              // root entry waits for its TTL.
+              Effect.tap(() => repositoryIdentityResolver.resolve(input.cwd, { refresh: true })),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
         [WS_METHODS.projectsSearchEntries]: (input) =>
           workspaceEntries.search(input).pipe(
             Effect.mapError(
@@ -2896,7 +2915,11 @@ const layerWsRpc = (
           worktreeSetupTracker
             .cancel(input.threadId)
             .pipe(Effect.map((cancelled) => ({ cancelled }))),
-        [WS_METHODS.vcsRefreshStatus]: (input) => vcsStatusBroadcaster.refreshStatus(input.cwd),
+        [WS_METHODS.vcsRefreshStatus]: (input) =>
+          githubIdentity.withSubject(
+            currentSession.subject,
+            vcsStatusBroadcaster.refreshStatus(input.cwd),
+          ),
         [WS_METHODS.vcsPull]: (input) =>
           gitWorkflow.pullCurrentBranch(input.cwd).pipe(
             Effect.matchCauseEffect({
@@ -2906,84 +2929,76 @@ const layerWsRpc = (
             }),
           ),
         [WS_METHODS.gitRunStackedAction]: (input) =>
-          Stream.callback<GitActionProgressEvent, GitManagerServiceError | GitIdentityError>(
-            (queue) =>
-              Effect.gen(function* () {
-                const createsCommit =
-                  input.action === "commit" ||
-                  input.action === "commit_push" ||
-                  input.action === "commit_push_pr";
-                const identity = createsCommit
-                  ? yield* gitIdentity.resolveCommitIdentity(currentSession.subject)
-                  : undefined;
-                const githubToken =
-                  input.action === "create_pr" || input.action === "commit_push_pr"
-                    ? yield* gitIdentity.resolveGitHubToken(currentSession.subject)
-                    : null;
-                if (
-                  (input.action === "create_pr" || input.action === "commit_push_pr") &&
-                  githubToken === null
-                ) {
-                  return yield* new GitIdentityError({
-                    reason: "not_configured",
-                    detail: "Configure a GitHub token before creating a pull request.",
+          githubIdentity.withSubjectStream(
+            currentSession.subject,
+            Stream.callback<GitActionProgressEvent, GitManagerServiceError | GitIdentityError>(
+              (queue) =>
+                Effect.gen(function* () {
+                  const createsCommit =
+                    input.action === "commit" ||
+                    input.action === "commit_push" ||
+                    input.action === "commit_push_pr";
+                  const identity = createsCommit
+                    ? yield* gitIdentity.resolveCommitIdentity(currentSession.subject)
+                    : undefined;
+                  const githubToken =
+                    input.action === "create_pr" || input.action === "commit_push_pr"
+                      ? yield* gitIdentity.resolveGitHubToken(currentSession.subject)
+                      : null;
+                  if (
+                    (input.action === "create_pr" || input.action === "commit_push_pr") &&
+                    githubToken === null
+                  ) {
+                    return yield* new GitIdentityError({
+                      reason: "not_configured",
+                      detail: "Configure a GitHub token before creating a pull request.",
+                    });
+                  }
+                  const action = gitWorkflow.runStackedAction(input, {
+                    actionId: input.actionId,
+                    ...(identity ? { identity } : {}),
+                    progressReporter: {
+                      publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
+                    },
                   });
-                }
-                const action = gitWorkflow.runStackedAction(input, {
-                  actionId: input.actionId,
-                  ...(identity ? { identity } : {}),
-                  progressReporter: {
-                    publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
-                  },
-                });
-                return yield* githubToken === null
-                  ? action
-                  : action.pipe(
-                      Effect.provideService(GitHubApi.PinnedGitHubCredential, {
-                        host: "github.com",
-                        token: githubToken,
-                        credentialFingerprint:
-                          "github.com:" +
-                          NodeCrypto.createHash("sha256")
-                            .update(Redacted.value(githubToken), "utf8")
-                            .digest("hex"),
-                      }),
-                    );
-              }).pipe(
-                Effect.matchCauseEffect({
-                  onFailure: (cause) => Queue.failCause(queue, cause),
-                  onSuccess: (result) =>
-                    (input.threadId === undefined
-                      ? Effect.void
-                      : linkCreatedPullRequest({
-                          threadId: input.threadId,
-                          result,
-                          commandId: serverCommandId("pr-created-link"),
-                        }).pipe(
-                          Effect.provideService(Orchestrator.OrchestratorV2, orchestrationEngine),
-                          Effect.provideService(ProjectService.ProjectService, projectService),
-                        )
-                    ).pipe(
-                      Effect.andThen(
-                        refreshPushedPullRequests(input, result).pipe(
-                          Effect.provideService(Orchestrator.OrchestratorV2, orchestrationEngine),
-                          Effect.provideService(ProjectStore.ProjectStoreV2, projectStore),
-                          Effect.provideService(
-                            PullRequestService.PullRequestService,
-                            pullRequests,
+                  return yield* action;
+                }).pipe(
+                  Effect.matchCauseEffect({
+                    onFailure: (cause) => Queue.failCause(queue, cause),
+                    onSuccess: (result) =>
+                      (input.threadId === undefined
+                        ? Effect.void
+                        : linkCreatedPullRequest({
+                            threadId: input.threadId,
+                            result,
+                            commandId: serverCommandId("pr-created-link"),
+                          }).pipe(
+                            Effect.provideService(Orchestrator.OrchestratorV2, orchestrationEngine),
+                            Effect.provideService(ProjectService.ProjectService, projectService),
+                          )
+                      ).pipe(
+                        Effect.andThen(
+                          refreshPushedPullRequests(input, result).pipe(
+                            Effect.provideService(Orchestrator.OrchestratorV2, orchestrationEngine),
+                            Effect.provideService(ProjectStore.ProjectStoreV2, projectStore),
+                            Effect.provideService(
+                              PullRequestService.PullRequestService,
+                              pullRequests,
+                            ),
                           ),
                         ),
+                        Effect.andThen(refreshGitStatus(input.cwd)),
+                        Effect.andThen(Queue.end(queue).pipe(Effect.asVoid)),
                       ),
-                      Effect.andThen(refreshGitStatus(input.cwd)),
-                      Effect.andThen(Queue.end(queue).pipe(Effect.asVoid)),
-                    ),
-                }),
-              ),
+                  }),
+                ),
+            ),
           ),
-        [WS_METHODS.gitResolvePullRequest]: (input) => gitWorkflow.resolvePullRequest(input),
+        [WS_METHODS.gitResolvePullRequest]: (input) =>
+          githubIdentity.withSubject(currentSession.subject, gitWorkflow.resolvePullRequest(input)),
         [WS_METHODS.gitPreparePullRequestThread]: (input) =>
-          gitWorkflow
-            .preparePullRequestThread(input)
+          githubIdentity
+            .withSubject(currentSession.subject, gitWorkflow.preparePullRequestThread(input))
             .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.gitIdentityGet]: (_input) => gitIdentity.get(currentSession.subject),
         [WS_METHODS.gitIdentityUpdate]: (input) =>
