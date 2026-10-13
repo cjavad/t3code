@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - stable identity and credential keys use synchronous SHA-256.
 import * as NodeCrypto from "node:crypto";
 
 import type { OrchestrationV2ThreadGitIdentity, ThreadId } from "@t3tools/contracts";
@@ -8,7 +9,7 @@ import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
 
 import * as ServerConfig from "../config.ts";
-import * as McpProviderSession from "../mcp/McpProviderSession.ts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { AuthUserRepository } from "../persistence/AuthUsers.ts";
 import { makeGitExecutionEnvironment } from "./GitExecutionEnvironment.ts";
 import * as GitIdentityService from "./GitIdentityService.ts";
@@ -50,6 +51,7 @@ const subjectKey = (subject: string): string =>
   NodeCrypto.createHash("sha256").update(subject, "utf8").digest("hex").slice(0, 40);
 
 export const make = Effect.gen(function* () {
+  const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
   const config = yield* ServerConfig.ServerConfig;
   const gitIdentity = yield* GitIdentityService.GitIdentityService;
   const authUsers = yield* AuthUserRepository;
@@ -131,7 +133,7 @@ export const make = Effect.gen(function* () {
     "ThreadGitEnvironment.applyToThread",
   )(function* (threadId, identity) {
     const environment = yield* forThreadIdentity(identity);
-    McpProviderSession.setGitExecutionEnvironment(threadId, environment);
+    yield* mcpSessions.setGitExecutionEnvironment(threadId, environment);
     if (identity == null) {
       yield* Effect.logWarning("thread has no git identity; agent commits will be refused", {
         threadId,

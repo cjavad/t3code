@@ -1,3 +1,4 @@
+import * as GitHubIdentity from "../auth/gitHubIdentity.ts";
 import {
   CommandId,
   MessageId,
@@ -29,7 +30,7 @@ import type * as Scope from "effect/Scope";
 import {
   type ProviderChangeRequestWatchFingerprint,
   PullRequestProviderError,
-} from "../pullRequest/PullRequestProvider.ts";
+} from "@t3tools/source-control-core/server/PullRequestProvider";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -232,6 +233,7 @@ export class PullRequestWatchReactor extends Context.Service<
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
+  const githubIdentity = yield* GitHubIdentity.make;
   const engine = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const pullRequests = yield* PullRequestService.PullRequestService;
@@ -452,21 +454,26 @@ export const make = Effect.gen(function* () {
    * read would be refused.
    */
   const fingerprintOf = (group: WatchGroup) =>
-    pullRequests.watchFingerprint(referenceOf(group)).pipe(
-      Effect.catchCause(
-        (cause): Effect.Effect<ProviderChangeRequestWatchFingerprint | null | "paused"> =>
-          Cause.hasInterruptsOnly(cause)
-            ? Effect.interrupt
-            : isRateLimited(cause)
-              ? Effect.succeed("paused")
-              : // The snapshot-gated reads report a host that cannot be read, and count toward
-                // giving up.
-                Effect.logDebug("pull request watch fingerprint failed", {
-                  pullRequest: group.key,
-                  cause,
-                }).pipe(Effect.as(null)),
-      ),
-    );
+    githubIdentity
+      .withThreadIdentity(
+        group.targets[0]!.thread.gitIdentity,
+        pullRequests.watchFingerprint(referenceOf(group)),
+      )
+      .pipe(
+        Effect.catchCause(
+          (cause): Effect.Effect<ProviderChangeRequestWatchFingerprint | null | "paused"> =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.interrupt
+              : isRateLimited(cause)
+                ? Effect.succeed("paused")
+                : // The snapshot-gated reads report a host that cannot be read, and count toward
+                  // giving up.
+                  Effect.logDebug("pull request watch fingerprint failed", {
+                    pullRequest: group.key,
+                    cause,
+                  }).pipe(Effect.as(null)),
+        ),
+      );
 
   const readGroup = Effect.fn("PullRequestWatchReactor.readGroup")(function* (
     group: WatchGroup,
@@ -594,7 +601,7 @@ export const make = Effect.gen(function* () {
       }
       // Grouped per project too: each project reads through its own checkout, so one that cannot
       // read the pull request must not end another project's watches.
-      const key = `${target.thread.projectId} ${threadPullRequestKeyOf(target.link)}`;
+      const key = `${target.thread.projectId} ${threadPullRequestKeyOf(target.link)} ${target.thread.gitIdentity?.userId ?? ""}`;
       byPullRequest.set(key, [...(byPullRequest.get(key) ?? []), target]);
     }
     const groups = [...byPullRequest].map(([key, members]): WatchGroup => ({
@@ -628,11 +635,16 @@ export const make = Effect.gen(function* () {
         const fingerprint = fingerprints[index]!;
         return fingerprint === "paused"
           ? Effect.void
-          : readGroup(group, fingerprint).pipe(
-              Effect.catchCause(
-                logFailure("pull request watch check failed", { pullRequest: group.key }),
-              ),
-            );
+          : githubIdentity
+              .withThreadIdentity(
+                group.targets[0]!.thread.gitIdentity,
+                readGroup(group, fingerprint),
+              )
+              .pipe(
+                Effect.catchCause(
+                  logFailure("pull request watch check failed", { pullRequest: group.key }),
+                ),
+              );
       },
       { concurrency: 4, discard: true },
     );

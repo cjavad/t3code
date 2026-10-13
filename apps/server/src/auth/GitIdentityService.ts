@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - stable identity and credential keys use synchronous SHA-256.
 import * as NodeCrypto from "node:crypto";
 
 import {
@@ -97,7 +98,7 @@ export const make = Effect.gen(function* () {
           });
         }
         return parsed;
-      } catch (cause) {
+      } catch {
         return yield* new GitIdentityError({
           reason: "storage",
           detail: "The stored Git identity profile could not be decoded.",

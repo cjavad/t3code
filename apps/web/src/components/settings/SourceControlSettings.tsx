@@ -47,17 +47,10 @@ import {
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-import {
-  AzureDevOpsIcon,
-  BitbucketIcon,
-  GitHubIcon,
-  GitIcon,
-  GitLabIcon,
-  ForgejoIcon,
-  JujutsuIcon,
-  type Icon,
-} from "../Icons";
-import { BitbucketCredentialsSettings } from "./BitbucketCredentialsSettings";
+import { GitIcon, JujutsuIcon, type Icon } from "../Icons";
+import { SourceControlHostSettings } from "./SourceControlHostSettings";
+import { GitHubAccountSettings } from "./GitHubAccountSettings";
+import { GitHubTokenSettings } from "./GitHubTokenSettings";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
 import {
@@ -68,23 +61,17 @@ import {
   SettingsSection,
   useSettingsSearchTargetId,
 } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { searchableSetting, sourceControlHostSettingsSearchId } from "./settingsSearch";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
+import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import { sourceControlIcon } from "~/sourceControlPresentation";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
   sourceControlProviders: [],
-};
-
-const SOURCE_CONTROL_PROVIDER_ICONS: Partial<Record<SourceControlProviderKind, Icon>> = {
-  github: GitHubIcon,
-  gitlab: GitLabIcon,
-  forgejo: ForgejoIcon,
-  "azure-devops": AzureDevOpsIcon,
-  bitbucket: BitbucketIcon,
 };
 
 const VCS_ICONS: Partial<Record<VcsDriverKind, Icon>> = {
@@ -185,8 +172,9 @@ function SourceControlItemMark({
   readonly item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem;
 }) {
   const dotClassName = itemStatusDot(item);
+  const host = isProviderDiscoveryItem(item) ? sourceControlClients.find(item.kind) : undefined;
   const Icon = isProviderDiscoveryItem(item)
-    ? SOURCE_CONTROL_PROVIDER_ICONS[item.kind]
+    ? host && sourceControlIcon(host)
     : VCS_ICONS[item.kind];
 
   if (!Icon) {
@@ -226,6 +214,9 @@ function itemSummary({
 
   if (auth) {
     if (auth.status === "authenticated") {
+      // The server names the account its requests use, Settings choice included, and
+      // says when an environment token overrides it.
+      const authDetail = optionLabel(auth.detail);
       return (
         <>
           <span>Authenticated</span>
@@ -235,6 +226,7 @@ function itemSummary({
               <RedactedAccount account={authAccount} />
             </>
           ) : null}
+          {authDetail ? <span>· {authDetail}</span> : null}
         </>
       );
     }
@@ -243,6 +235,11 @@ function itemSummary({
     // through to the "could not verify" detail instead of repeating the setup hint.
     if (!item.executable && auth.status === "unauthenticated") {
       return <span>Available. {item.installHint}</span>;
+    }
+
+    // Signed in, but every login is turned off here: the fix is the switch below, not the CLI.
+    if (auth.status === "unauthenticated" && auth.accounts?.some((entry) => entry.authenticated)) {
+      return <span>{optionLabel(auth.detail) ?? `Every ${item.label} host is turned off.`}</span>;
     }
 
     if (auth.status === "unauthenticated") {
@@ -286,8 +283,8 @@ function DiscoveryItemRow({
   useEffect(() => {
     if (
       (item.kind === "git" && searchTargetId === searchableSetting("git-fetch-interval").id) ||
-      (item.kind === "bitbucket" &&
-        searchTargetId === searchableSetting("bitbucket-credentials").id)
+      searchTargetId === sourceControlHostSettingsSearchId(item.kind) ||
+      (item.kind === "github" && searchTargetId === searchableSetting("github-accounts").id)
     ) {
       setIsExpanded(true);
     }
@@ -638,6 +635,22 @@ export function SourceControlSettingsPanel() {
   const handleScan = () => {
     discovery.refresh();
   };
+  /** The host's own settings form, for a host whose definition declares settings. */
+  const hostSettingsPanel = (kind: string) => {
+    const definition = sourceControlClients.find(kind);
+    if (!definition?.settings || environmentId === null) return undefined;
+    return (
+      <SettingsSearchTarget id={sourceControlHostSettingsSearchId(kind)}>
+        <SourceControlHostSettings
+          // Drafts belong to one environment; switching must not carry them over.
+          key={environmentId}
+          environmentId={environmentId}
+          definition={{ ...definition, settings: definition.settings }}
+          onSaved={handleScan}
+        />
+      </SettingsSearchTarget>
+    );
+  };
   const scanButton = (
     <Tooltip>
       <TooltipTrigger
@@ -702,16 +715,28 @@ export function SourceControlSettingsPanel() {
             >
               {result.sourceControlProviders.map((item) => (
                 <DiscoveryItemRow key={`provider:${item.kind}`} item={item}>
-                  {item.kind === "bitbucket" ? (
-                    <SettingsSearchTarget id={searchableSetting("bitbucket-credentials").id}>
-                      <BitbucketCredentialsSettings
-                        // Drafts belong to one environment; switching must not carry them over.
-                        key={environmentId}
-                        environmentId={environmentId}
-                        onSaved={handleScan}
-                      />
+                  {item.kind === "github" ? (
+                    <SettingsSearchTarget id={searchableSetting("github-accounts").id}>
+                      <div className="grid gap-6">
+                        {/* Shown even without gh: a saved token is how GitHub works without the CLI. */}
+                        <GitHubTokenSettings
+                          key={`token-${environmentId}`}
+                          environmentId={environmentId}
+                          onSaved={handleScan}
+                        />
+                        {item.status === "available" ? (
+                          <GitHubAccountSettings
+                            key={environmentId}
+                            environmentId={environmentId}
+                            auth={item.auth}
+                            onSaved={handleScan}
+                          />
+                        ) : null}
+                      </div>
                     </SettingsSearchTarget>
-                  ) : undefined}
+                  ) : (
+                    hostSettingsPanel(item.kind)
+                  )}
                 </DiscoveryItemRow>
               ))}
             </SettingsSection>

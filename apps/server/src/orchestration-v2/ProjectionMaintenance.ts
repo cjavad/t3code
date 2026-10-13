@@ -10,6 +10,14 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as EventStore from "./EventStore.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 
+/** Online callers keep short transactions; offline maintenance can scan larger pages. */
+export const CompactionPageSize = Context.Reference<number>(
+  "t3/ProjectionMaintenance/CompactionPageSize",
+  {
+    defaultValue: () => 500,
+  },
+);
+
 export interface ProjectionVerificationV2 {
   readonly valid: boolean;
   readonly schemaVersion: number;
@@ -230,8 +238,6 @@ export const layer: Layer.Layer<
     ];
 
     const supersedableThreadEventTypes = new Set(SUPERSEDABLE_THREAD_EVENT_TYPES);
-    const COMPACTION_PAGE_SIZE = 500;
-
     /**
      * Scan newest first to retain the newest state for each entity.
      * Page every event, including non-candidates: filtering before LIMIT could
@@ -239,6 +245,10 @@ export const layer: Layer.Layer<
      * turn-item.updated stays intact because replay assigns positions on first write.
      */
     const compactEventStore = Effect.gen(function* () {
+      const requestedPageSize = yield* CompactionPageSize;
+      const COMPACTION_PAGE_SIZE = Number.isFinite(requestedPageSize)
+        ? Math.max(1, Math.min(5_000, Math.floor(requestedPageSize)))
+        : 500;
       const bounds = yield* sql<{
         readonly event_sequence: number;
         readonly receipt_row_id: number;

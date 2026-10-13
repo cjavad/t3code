@@ -39,7 +39,9 @@ describe("V2 preview upgrade", () => {
         [56, "RemoveRedundantProjectionIndexes"],
         [57, "ScheduledTaskWebhooks"],
         [58, "WebhookRelayDeliveries"],
-        // Fork migrations above the upstream released range.
+        [59, "McpAppModelContext"],
+        [60, "ThreadSnapshotWindowIndexes"],
+        [61, "PullRequestReviewGuides"],
         [63, "AuthUsers"],
         [64, "AuthCloudDevices"],
       ]);
@@ -123,7 +125,9 @@ describe("V2 preview upgrade", () => {
         [56, "RemoveRedundantProjectionIndexes"],
         [57, "ScheduledTaskWebhooks"],
         [58, "WebhookRelayDeliveries"],
-        // Fork migrations above the upstream released range.
+        [59, "McpAppModelContext"],
+        [60, "ThreadSnapshotWindowIndexes"],
+        [61, "PullRequestReviewGuides"],
         [63, "AuthUsers"],
         [64, "AuthCloudDevices"],
       ]);

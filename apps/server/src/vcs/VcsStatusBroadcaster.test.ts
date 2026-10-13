@@ -1,3 +1,5 @@
+import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
+import { SourceControlProviderKind } from "@t3tools/contracts";
 import { assert, it, describe } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Cause from "effect/Cause";
@@ -34,7 +36,7 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 const baseLocalStatus: VcsStatusLocalResult = {
   isRepo: true,
   sourceControlProvider: {
-    kind: "github",
+    kind: SourceControlProviderKind.make("github"),
     name: "GitHub",
     baseUrl: "https://github.com",
   },
@@ -594,7 +596,7 @@ describe("VcsStatusBroadcaster", () => {
     },
   );
 
-  it.effect("streams a local snapshot first and remote updates later", () => {
+  it.effect("passive streams retain cached remote status", () => {
     const state = {
       currentLocalStatus: baseLocalStatus,
       currentRemoteStatus: baseRemoteStatus,
@@ -608,18 +610,25 @@ describe("VcsStatusBroadcaster", () => {
       const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const snapshotDeferred = yield* Deferred.make<VcsStatusStreamEvent>();
       const remoteUpdatedDeferred = yield* Deferred.make<VcsStatusStreamEvent>();
-      yield* Stream.runForEach(broadcaster.streamStatus({ cwd: "/repo" }), (event) => {
-        if (event._tag === "snapshot") {
-          return Deferred.succeed(snapshotDeferred, event).pipe(Effect.ignore);
-        }
-        if (event._tag === "remoteUpdated") {
-          return Deferred.succeed(remoteUpdatedDeferred, event).pipe(Effect.ignore);
-        }
-        return Effect.void;
-      }).pipe(Effect.forkScoped);
+      yield* Stream.runForEach(
+        broadcaster.streamStatus({ cwd: "/repo", includeRemote: false }),
+        (event) => {
+          if (event._tag === "snapshot") {
+            return Deferred.succeed(snapshotDeferred, event).pipe(Effect.ignore);
+          }
+          if (event._tag === "remoteUpdated") {
+            return Deferred.succeed(remoteUpdatedDeferred, event).pipe(Effect.ignore);
+          }
+          return Effect.void;
+        },
+      ).pipe(Effect.forkScoped);
 
       const snapshot = yield* Deferred.await(snapshotDeferred);
-      yield* broadcaster.refreshStatus("/repo");
+      yield* TestClock.adjust("1 minute");
+      assert.equal(state.remoteStatusCalls, 0);
+      yield* broadcaster.getStatus({ cwd: "/repo" });
+      state.currentRemoteStatus = remoteStatusWithPr;
+      yield* broadcaster.refreshPullRequestStatus("/repo");
       const remoteUpdated = yield* Deferred.await(remoteUpdatedDeferred);
 
       assert.deepStrictEqual(snapshot, {
@@ -629,8 +638,16 @@ describe("VcsStatusBroadcaster", () => {
       } satisfies VcsStatusStreamEvent);
       assert.deepStrictEqual(remoteUpdated, {
         _tag: "remoteUpdated",
-        remote: baseRemoteStatus,
+        remote: remoteStatusWithPr,
       } satisfies VcsStatusStreamEvent);
+      const cachedSnapshot = yield* Stream.runHead(
+        broadcaster.streamStatus({ cwd: "/repo", includeRemote: false }),
+      );
+      assert.deepStrictEqual(Option.getOrThrow(cachedSnapshot), {
+        _tag: "snapshot",
+        local: baseLocalStatus,
+        remote: remoteStatusWithPr,
+      });
     }).pipe(Effect.provide(layerTestFor(state)));
   });
 
@@ -1032,7 +1049,7 @@ describe("VcsStatusBroadcaster", () => {
     }).pipe(Effect.provide(layerTest));
   });
 
-  it.effect("stops the remote poller after the last stream subscriber disconnects", () => {
+  it.effect("releases remote demand while passive observers remain", () => {
     const state = {
       currentLocalStatus: baseLocalStatus,
       currentRemoteStatus: baseRemoteStatus,
@@ -1092,6 +1109,16 @@ describe("VcsStatusBroadcaster", () => {
       const secondSnapshot = yield* Deferred.make<VcsStatusStreamEvent>();
       const firstScope = yield* Scope.make();
       const secondScope = yield* Scope.make();
+      const passiveSnapshot = yield* Deferred.make<VcsStatusStreamEvent>();
+      yield* Stream.runForEach(
+        broadcaster.streamStatus({ cwd: "/repo", includeRemote: false }),
+        (event) =>
+          event._tag === "snapshot"
+            ? Deferred.succeed(passiveSnapshot, event).pipe(Effect.ignore)
+            : Effect.void,
+      ).pipe(Effect.forkScoped);
+      yield* Deferred.await(passiveSnapshot);
+      assert.equal(state.remoteStatusCalls, 0);
       yield* Stream.runForEach(broadcaster.streamStatus({ cwd: "/repo" }), (event) =>
         event._tag === "snapshot"
           ? Deferred.succeed(firstSnapshot, event).pipe(Effect.ignore)
@@ -1118,3 +1145,46 @@ describe("VcsStatusBroadcaster", () => {
     }).pipe(Effect.provide(layerTest));
   });
 });
+
+it.effect("keeps cached PR status separate for people sharing the same checkout", () =>
+  Effect.gen(function* () {
+    const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+    const read = (person: string) =>
+      broadcaster
+        .getStatus({ cwd: "/repo" })
+        .pipe(Effect.provideService(SourceControlRateLimit.CredentialScope, person));
+    const alice = yield* read("alice");
+    const bob = yield* read("bob");
+    const again = yield* read("alice");
+    assert.strictEqual(alice.pr?.title, "alice");
+    assert.strictEqual(bob.pr?.title, "bob");
+    assert.strictEqual(again.pr?.title, "alice");
+  }).pipe(
+    Effect.provide(
+      VcsStatusBroadcaster.layer.pipe(
+        Layer.provide(NodeServices.layer),
+        Layer.provide(layerBackgroundPolicy(() => true)),
+        Layer.provide(
+          Layer.mock(GitWorkflowService.GitWorkflowService)({
+            localStatus: () => Effect.succeed(baseLocalStatus),
+            remoteStatus: () =>
+              SourceControlRateLimit.CredentialScope.pipe(
+                Effect.map((person) => ({
+                  ...baseRemoteStatus,
+                  pr: {
+                    number: 1,
+                    title: person,
+                    url: "https://github.com/acme/web/pull/1",
+                    baseRef: "main",
+                    headRef: "feature",
+                    state: "open" as const,
+                  },
+                })),
+              ),
+          }),
+        ),
+      ),
+    ),
+    Effect.scoped,
+  ),
+);

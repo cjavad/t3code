@@ -26,7 +26,12 @@ it.effect("fills upstream migrations below the released fork ledger and preserve
       yield* sql`SELECT name FROM sqlite_master WHERE name = 'scheduled_task_webhook_relay_deliveries'`,
       [],
     );
-    assert.deepStrictEqual(yield* runMigrations(), [[58, "WebhookRelayDeliveries"]]);
+    assert.deepStrictEqual(yield* runMigrations(), [
+      [58, "WebhookRelayDeliveries"],
+      [59, "McpAppModelContext"],
+      [60, "ThreadSnapshotWindowIndexes"],
+      [61, "PullRequestReviewGuides"],
+    ]);
     assert.deepStrictEqual(yield* runMigrations(), []);
     assert.deepStrictEqual(yield* sql`SELECT * FROM auth_users`, auth);
     const after = yield* sql<{
@@ -34,7 +39,7 @@ it.effect("fills upstream migrations below the released fork ledger and preserve
       name: string;
     }>`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
     assert.deepStrictEqual(
-      after.filter((row) => row.migration_id !== 57 && row.migration_id !== 58),
+      after.filter((row) => row.migration_id < 57 || row.migration_id >= 63),
       ledger,
     );
     assert.deepStrictEqual(

@@ -14,24 +14,19 @@ import { publicProxy } from "./publicProxy.ts";
 
 export class HtmlRenderBrowserError extends Schema.TaggedError<HtmlRenderBrowserError>()(
   "HtmlRenderBrowserError",
-  { reason: Schema.String, cause: Schema.optional(Schema.Defect()) },
+  {
+    reason: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+    /** The end of the browser's stderr when it exited, for diagnosing host setup. */
+    output: Schema.optional(Schema.String),
+  },
 ) {
   override get message(): string {
     return `Headless Chrome could not render the page: ${this.reason}.`;
   }
 }
 
-/** The browser died at startup because this host cannot give it a sandbox. */
-export class HtmlRenderSandboxUnavailableError extends Schema.TaggedError<HtmlRenderSandboxUnavailableError>()(
-  "HtmlRenderSandboxUnavailableError",
-  {},
-) {
-  override get message(): string {
-    return "Chrome's sandbox is unavailable on this host.";
-  }
-}
-
-type BrowserFailure = HtmlRenderBrowserError | HtmlRenderSandboxUnavailableError;
+type BrowserFailure = HtmlRenderBrowserError;
 
 export interface ConsoleMessage {
   readonly level: "log" | "info" | "warning" | "error";
@@ -67,9 +62,6 @@ const textEncoder = new TextEncoder();
  */
 const pageBody = (html: string) =>
   Buffer.from(Buffer.from(html, "utf8").toString("base64"), "latin1");
-// What Chrome prints before aborting when it cannot sandbox itself, e.g. on
-// Ubuntu 23.10+ where AppArmor restricts unprivileged user namespaces.
-const NO_SANDBOX_SIGNATURE = "No usable sandbox";
 
 const CdpMessage = Schema.fromJsonString(
   Schema.Struct({
@@ -83,6 +75,7 @@ const CdpMessage = Schema.fromJsonString(
 );
 const decodeCdpMessage = Schema.decodeUnknownOption(CdpMessage);
 const encodeCdpCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const decodeStoppedFrame = Schema.decodeUnknownOption(Schema.Struct({ frameId: Schema.String }));
 const RemoteObject = Schema.Struct({
   type: Schema.String,
   value: Schema.optional(Schema.Unknown),
@@ -170,6 +163,7 @@ const Navigation = Schema.Struct({ errorText: Schema.optional(Schema.String) });
 const Measured = Schema.Struct({ result: Schema.Struct({ value: Schema.Finite }) });
 
 interface PageEvents {
+  served: boolean;
   /** The page's main frame, which only ever shows `PAGE_URL`. */
   readonly mainFrameId: string;
   /** The page served for `PAGE_URL`, from `pageBody`. */
@@ -239,13 +233,11 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
     );
 
   let stderrTail = "";
-  let sandboxUnavailable = false;
   const stderrReader = yield* child.stderr.pipe(
     Stream.decodeText(),
     Stream.runForEach((text) =>
       Effect.sync(() => {
-        stderrTail = (stderrTail + text).slice(-1_024);
-        if (stderrTail.includes(NO_SANDBOX_SIGNATURE)) sandboxUnavailable = true;
+        stderrTail = (stderrTail + text).slice(-2_048);
       }),
     ),
     Effect.ignore,
@@ -303,12 +295,21 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
     if (message.method === "Page.loadEventFired") {
       return page.loaded ? Deferred.succeed(page.loaded, undefined) : Effect.void;
     }
+    if (message.method === "Page.frameStoppedLoading") {
+      const frame = Option.getOrUndefined(decodeStoppedFrame(message.params));
+      // A script can attempt a forbidden navigation before loadEventFired.
+      // Once that attempt stops, the served preview can still be captured.
+      return page.served && frame?.frameId === page.mainFrameId && page.loaded
+        ? Deferred.succeed(page.loaded, undefined)
+        : Effect.void;
+    }
     if (message.method === "Fetch.requestPaused") {
       const paused = Option.getOrUndefined(decodeRequestPaused(message.params));
       if (!paused) return Effect.void;
       const body = page.body;
       const url = paused.request.url.split("#", 1)[0]!;
       if (url === PAGE_URL && body !== undefined) {
+        page.served = true;
         return fulfillPage(sessionId, paused.requestId, body);
       }
       // A frame inside the page may show another site; Local Network Access
@@ -340,13 +341,14 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
     return Effect.void;
   };
 
-  // The pipe closes when the browser exits. A sandbox abort says why on
-  // stderr, which may still be draining, so give it a moment.
+  // The pipe closes when the browser exits. A startup abort, such as a missing
+  // sandbox, says why on stderr, which may still be draining, so give it a moment.
   const disconnect = Effect.gen(function* () {
     yield* Fiber.await(stderrReader).pipe(Effect.timeout("1 second"), Effect.ignore);
-    const error = sandboxUnavailable
-      ? new HtmlRenderSandboxUnavailableError()
-      : new HtmlRenderBrowserError({ reason: "the browser exited unexpectedly" });
+    const error = new HtmlRenderBrowserError({
+      reason: "the browser exited unexpectedly",
+      output: stderrTail,
+    });
     disconnected = error;
     const waiters = [...pending.values()];
     pending.clear();
@@ -396,8 +398,7 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
       return yield* Deferred.await(reply).pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(result)),
         Effect.mapError((error) =>
-          error._tag === "HtmlRenderBrowserError" ||
-          error._tag === "HtmlRenderSandboxUnavailableError"
+          error._tag === "HtmlRenderBrowserError"
             ? error
             : new HtmlRenderBrowserError({
                 reason: `${method} returned an unexpected result`,
@@ -420,6 +421,7 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
       Schema.Struct({ sessionId: Schema.String }),
     );
     const events: PageEvents = {
+      served: false,
       // A page target's id is its main frame's id.
       mainFrameId: targetId,
       body: undefined,
@@ -466,6 +468,7 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
     const load = Effect.fnUntraced(function* (body: Uint8Array, urlFragment: string) {
       const loaded = yield* Deferred.make<void, BrowserFailure>();
       events.body = body;
+      events.served = false;
       events.loaded = loaded;
       const navigation = yield* send(
         "Page.navigate",
