@@ -13,7 +13,7 @@ layer("055_OrchestrationV2", (it) => {
     Effect.sync(() => {
       assert.deepStrictEqual(
         migrationEntries.map(([id]) => id),
-        [...Array.from({ length: 61 }, (_, index) => index + 1), 63, 64],
+        Array.from({ length: 65 }, (_, index) => index + 1),
       );
     }),
   );
@@ -33,8 +33,10 @@ layer("055_OrchestrationV2", (it) => {
         [59, "McpAppModelContext"],
         [60, "ThreadSnapshotWindowIndexes"],
         [61, "PullRequestReviewGuides"],
+        [62, "ThreadFailureLookupIndex"],
         [63, "AuthUsers"],
         [64, "AuthCloudDevices"],
+        [65, "CompressedStorage"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
@@ -62,8 +64,10 @@ layer("055_OrchestrationV2", (it) => {
         { migration_id: 59, name: "McpAppModelContext" },
         { migration_id: 60, name: "ThreadSnapshotWindowIndexes" },
         { migration_id: 61, name: "PullRequestReviewGuides" },
+        { migration_id: 62, name: "ThreadFailureLookupIndex" },
         { migration_id: 63, name: "AuthUsers" },
         { migration_id: 64, name: "AuthCloudDevices" },
+        { migration_id: 65, name: "CompressedStorage" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`

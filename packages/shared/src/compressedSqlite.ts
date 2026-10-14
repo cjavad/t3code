@@ -7,9 +7,6 @@ export const COMPRESSED_PROJECTION_TABLES = [
   "orchestration_v2_projection_turn_items",
 ] as const;
 
-const CACHE_BYTES = 32 * 1024 * 1024;
-const MAX_CHUNK_BYTES = 256 * 1024 * 1024;
-
 export type StoredValue = string | number | null | { blob: string } | { integer: string };
 
 export function encodeSqliteRow(values: readonly NodeSqlite.SQLInputValue[]): StoredValue[] {
@@ -40,20 +37,23 @@ export function decodeSqliteRow(values: readonly StoredValue[]): NodeSqlite.SQLI
   });
 }
 
-export function decodeStorageChunk(
+function decodeStorageChunkWithCodecs(
   payload: Uint8Array,
   expectedHash: string,
-  expectedBytes?: number,
+  expectedBytes: number | undefined,
+  codecs: typeof NodeZlib,
+  crypto: typeof NodeCrypto,
 ): StoredValue[][] {
+  const MAX_CHUNK_BYTES = 256 * 1024 * 1024;
   // Zstandard is available in the supported Node runtimes. Gzip remains readable for older copies.
   const zstd =
     payload[0] === 0x28 && payload[1] === 0xb5 && payload[2] === 0x2f && payload[3] === 0xfd;
   const raw = zstd
-    ? NodeZlib.zstdDecompressSync(payload, { maxOutputLength: MAX_CHUNK_BYTES })
-    : NodeZlib.gunzipSync(payload, { maxOutputLength: MAX_CHUNK_BYTES });
+    ? codecs.zstdDecompressSync(payload, { maxOutputLength: MAX_CHUNK_BYTES })
+    : codecs.gunzipSync(payload, { maxOutputLength: MAX_CHUNK_BYTES });
   if (
     (expectedBytes !== undefined && raw.length !== expectedBytes) ||
-    NodeCrypto.createHash("sha256").update(raw).digest("hex") !== expectedHash
+    crypto.createHash("sha256").update(raw).digest("hex") !== expectedHash
   ) {
     throw new Error("Compressed database chunk failed verification");
   }
@@ -81,6 +81,14 @@ export function decodeStorageChunk(
     throw new Error("Compressed database chunk has invalid rows");
   }
   return rows as StoredValue[][];
+}
+
+export function decodeStorageChunk(
+  payload: Uint8Array,
+  expectedHash: string,
+  expectedBytes?: number,
+): StoredValue[][] {
+  return decodeStorageChunkWithCodecs(payload, expectedHash, expectedBytes, NodeZlib, NodeCrypto);
 }
 
 /** Only mutations target the inline column; reads continue using the indexed, generated JSON. */
@@ -140,7 +148,12 @@ function rewriteMutation(query: string, table: string): string {
 }
 
 /** Install before preparing schema-dependent SQL, including on read-only connections. */
-export function registerCompressedSqlite(db: NodeSqlite.DatabaseSync): (query: string) => string {
+// Self-contained so the same verified reader can be installed in the bundled SQLite worker.
+function registerCompressedPayloadReader(
+  db: NodeSqlite.DatabaseSync,
+  decode: typeof decodeStorageChunk,
+): void {
+  const CACHE_BYTES = 32 * 1024 * 1024;
   const cache = new Map<number, { rows: StoredValue[][]; bytes: number }>();
   let bytes = 0;
   let read: ReturnType<NodeSqlite.DatabaseSync["prepare"]> | undefined;
@@ -172,7 +185,7 @@ export function registerCompressedSqlite(db: NodeSqlite.DatabaseSync): (query: s
         throw new Error("Compressed database payload is missing its chunk");
       }
       entry = {
-        rows: decodeStorageChunk(chunk.payload, chunk.sha256, chunk.raw_bytes),
+        rows: decode(chunk.payload, chunk.sha256, chunk.raw_bytes),
         bytes: chunk.raw_bytes,
       };
       if (entry.bytes <= CACHE_BYTES) {
@@ -192,6 +205,20 @@ export function registerCompressedSqlite(db: NodeSqlite.DatabaseSync): (query: s
     if (typeof value !== "string") throw new Error("Compressed database JSON payload is invalid");
     return value;
   });
+}
+
+/** Source for the eval worker; closures are explicitly supplied instead of relying on bundle paths. */
+export function compressedSqliteReaderWorkerSource(): string {
+  return `
+    const decode = (${decodeStorageChunkWithCodecs.toString()});
+    (${registerCompressedPayloadReader.toString()})(next, (payload, hash, bytes) =>
+      decode(payload, hash, bytes, require("node:zlib"), require("node:crypto")));
+  `;
+}
+
+/** Install before preparing schema-dependent SQL, including on read-only connections. */
+export function registerCompressedSqlite(db: NodeSqlite.DatabaseSync): (query: string) => string {
+  registerCompressedPayloadReader(db, decodeStorageChunk);
   const compressed = new Set<string>();
   for (const table of COMPRESSED_PROJECTION_TABLES) {
     const schema = db

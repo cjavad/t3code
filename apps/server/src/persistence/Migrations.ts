@@ -80,6 +80,7 @@ import Migration0058 from "./Migrations/058_WebhookRelayDeliveries.ts";
 import Migration0059 from "./Migrations/059_McpAppModelContext.ts";
 import Migration0060 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
 import Migration0061 from "./Migrations/061_PullRequestReviewGuides.ts";
+import Migration0062 from "./Migrations/062_ThreadFailureLookupIndex.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -155,6 +156,7 @@ export const migrationEntries = [
   [59, "McpAppModelContext", Migration0059],
   [60, "ThreadSnapshotWindowIndexes", Migration0060],
   [61, "PullRequestReviewGuides", Migration0061],
+  [62, "ThreadFailureLookupIndex", Migration0062],
   [63, "AuthUsers", Migration0063],
   [64, "AuthCloudDevices", Migration0064],
   [65, "CompressedStorage", Migration0065],
@@ -263,6 +265,7 @@ const reconcileForkMigrationGap = Effect.fn("reconcileForkMigrationGap")(functio
         [59, "McpAppModelContext", Migration0059],
         [60, "ThreadSnapshotWindowIndexes", Migration0060],
         [61, "PullRequestReviewGuides", Migration0061],
+        [62, "ThreadFailureLookupIndex", Migration0062],
       ] as const) {
         if (id < 57 || id >= 63 || (throughId !== undefined && id > throughId)) continue;
         const recorded = history.find((row) => row.migration_id === id);

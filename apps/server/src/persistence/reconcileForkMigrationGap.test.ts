@@ -31,6 +31,8 @@ it.effect("fills upstream migrations below the released fork ledger and preserve
       [59, "McpAppModelContext"],
       [60, "ThreadSnapshotWindowIndexes"],
       [61, "PullRequestReviewGuides"],
+      [62, "ThreadFailureLookupIndex"],
+      [65, "CompressedStorage"],
     ]);
     assert.deepStrictEqual(yield* runMigrations(), []);
     assert.deepStrictEqual(yield* sql`SELECT * FROM auth_users`, auth);
@@ -39,7 +41,9 @@ it.effect("fills upstream migrations below the released fork ledger and preserve
       name: string;
     }>`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
     assert.deepStrictEqual(
-      after.filter((row) => row.migration_id < 57 || row.migration_id >= 63),
+      after.filter(
+        (row) => row.migration_id < 57 || (row.migration_id >= 63 && row.migration_id < 65),
+      ),
       ledger,
     );
     assert.deepStrictEqual(
@@ -55,5 +59,21 @@ it.effect("fills upstream migrations below the released fork ledger and preserve
         .length,
       1,
     );
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
+
+it.effect("adds upstream migration 62 to the deployed compressed-storage ledger", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runMigrations();
+    yield* sql`DROP INDEX orchestration_v2_projection_turn_items_failed_error_idx`;
+    yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id=62`;
+    const original = yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id>=63`;
+    assert.deepStrictEqual(yield* runMigrations(), [[62, "ThreadFailureLookupIndex"]]);
+    assert.deepStrictEqual(
+      yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id>=63`,
+      original,
+    );
+    assert.deepStrictEqual(yield* runMigrations(), []);
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
