@@ -330,18 +330,43 @@ export function compactSqliteDatabase(input: {
     target
       .prepare("UPDATE sqlite_sequence SET seq=? WHERE name='orchestration_events'")
       .run(highWater);
+    // SQLite evaluates virtual columns even while building unrelated scalar indexes.
+    // Expanding every historical JSON string in one native call retains gigabytes of V8
+    // handles until the call returns. All indexes on compressed tables use scalar columns;
+    // their keys are independent of this temporary value. The subsequent row verifier
+    // checks actual chunk payloads and coordinates through a fresh real reader.
+    // Keep all three parameters: SQLite registers overloads by arity.
+    target.function(
+      "t3_read_payload",
+      { deterministic: true },
+      (_chunkId, _rowIndex, _columnIndex) => "{}",
+    );
     for (const row of schemas)
       if (row.type !== "table") {
         checkDeadline();
+        if (
+          row.type === "index" &&
+          /payload_json/i.test(String(row.sql)) &&
+          COMPRESSED_PROJECTION_TABLES.some((table) => String(row.sql).includes(table))
+        ) {
+          throw new Error("Compressed storage does not support JSON expression indexes");
+        }
+        input.onProgress?.({
+          table: `schema:${row.name}`,
+          rows: 0,
+          elapsedSeconds: (Date.now() - started) / 1000,
+          fileBytes: NodeFS.statSync(input.destination).size,
+        });
         target.exec(String(row.sql));
       }
     checkDeadline();
     target.exec("COMMIT; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL");
-    // quick_check evaluates virtual columns across the whole database in one native call.
-    // Returning every historical JSON string there retains gigabytes of V8 handles until
-    // it finishes. Payloads/chunk coordinates are verified separately by logical row hashes;
-    // this pass checks SQLite pages and scalar constraints without expanding the chunks.
-    target.function("t3_read_payload", { deterministic: true }, () => "{}");
+    input.onProgress?.({
+      table: "quick_check",
+      rows: 0,
+      elapsedSeconds: (Date.now() - started) / 1000,
+      fileBytes: NodeFS.statSync(input.destination).size,
+    });
     if (Object.values(target.prepare("PRAGMA quick_check").get() ?? {})[0] !== "ok")
       throw new Error("Compacted database failed SQLite verification");
     checkDeadline();
