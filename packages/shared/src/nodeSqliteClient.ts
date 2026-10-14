@@ -25,6 +25,8 @@ import type { Connection } from "effect/sql/SqlConnection";
 import { SqlError, classifySqliteError } from "effect/sql/SqlError";
 import * as Statement from "effect/sql/Statement";
 
+import { registerCompressedSqlite } from "./compressedSqlite.ts";
+
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
 
 export interface SqliteClientConfig {
@@ -133,6 +135,8 @@ const make = Effect.fn("makeWithDatabase")(function* (
       }).pipe(Effect.orDie),
     );
 
+    const rewriteQuery = registerCompressedSqlite(db);
+
     const statementReaderCache = new WeakMap<NodeSqlite.StatementSync, boolean>();
     const hasRows = (statement: NodeSqlite.StatementSync): boolean => {
       const cached = statementReaderCache.get(statement);
@@ -146,7 +150,7 @@ const make = Effect.fn("makeWithDatabase")(function* (
 
     const prepare = (sql: string) =>
       Effect.try({
-        try: () => db.prepare(sql),
+        try: () => db.prepare(rewriteQuery(sql)),
         catch: (cause) =>
           new SqlError({
             reason: classifyError(cause, "Failed to prepare statement", "prepare"),

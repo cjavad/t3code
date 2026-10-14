@@ -15,6 +15,7 @@ import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
 
 import { reconcileRenumberedProjectionMigrations } from "./reconcileRenumberedProjectionMigrations.ts";
 import Migration0063 from "./Migrations/063_AuthUsers.ts";
+import Migration0065 from "./Migrations/065_CompressedStorage.ts";
 import Migration0064 from "./Migrations/064_AuthCloudDevices.ts";
 
 // Import all migrations statically
@@ -156,6 +157,7 @@ export const migrationEntries = [
   [61, "PullRequestReviewGuides", Migration0061],
   [63, "AuthUsers", Migration0063],
   [64, "AuthCloudDevices", Migration0064],
+  [65, "CompressedStorage", Migration0065],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -708,7 +708,10 @@ const canReplayPersistedRange = Effect.fnUntraced(function* (
     afterSequence,
     throughSequence: headSequence,
   });
-  if (stats.rawPayloadBytes > ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES) {
+  if (
+    stats.requiresSnapshot === true ||
+    stats.rawPayloadBytes > ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES
+  ) {
     yield* Effect.logDebug("orchestration replay replaced by snapshot", {
       afterSequence,
       headSequence,
@@ -914,6 +917,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
       // Bound stored JSON before decoding, then check projected event
       // size separately. Neither byte count is a bound on process memory.
       if (
+        stats.requiresSnapshot === true ||
         stats.eventCount > THREAD_RESUME_MAX_REPLAY_EVENTS ||
         !isThreadReplayRawPayloadSafe(stats.rawPayloadBytes)
       ) {

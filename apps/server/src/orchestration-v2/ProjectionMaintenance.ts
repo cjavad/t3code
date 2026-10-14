@@ -1,3 +1,4 @@
+import { restoreStorageBaseline } from "./StorageBaseline.ts";
 import { ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -150,11 +151,15 @@ export const layer: Layer.Layer<
           yield* sql`DELETE FROM orchestration_v2_projection_threads`;
           yield* sql`DELETE FROM orchestration_v2_turn_item_positions`;
 
+          const baseline = yield* restoreStorageBaseline().pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+          );
           const pageSize = 500;
-          let lastSequence = 0;
+          let replaySequence = baseline.applicationSequence;
+          let lastSequence = baseline.agentSequence;
           while (true) {
             const page = yield* eventStore
-              .read({ afterSequence: lastSequence, throughSequence, limit: pageSize })
+              .read({ afterSequence: replaySequence, throughSequence, limit: pageSize })
               .pipe(Stream.runCollect);
             for (const stored of page) {
               yield* projectionStore.apply(stored.event);
@@ -175,6 +180,7 @@ export const layer: Layer.Layer<
                 `;
               }
               lastSequence = stored.sequence;
+              replaySequence = stored.sequence;
             }
             if (page.length < pageSize) break;
             yield* Effect.yieldNow;

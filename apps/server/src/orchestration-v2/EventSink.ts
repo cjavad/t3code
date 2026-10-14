@@ -1,3 +1,4 @@
+import { retainToolOutput } from "@t3tools/shared/toolOutputRetention";
 import {
   CommandId,
   type OrchestrationV2Run,
@@ -323,7 +324,30 @@ const layerBase: Layer.Layer<
                   event.payload,
                   event.payload.runId === null ? undefined : runOrdinals.get(event.payload.runId),
                 )
-                .pipe(Effect.map((payload) => ({ ...event, payload })))
+                .pipe(
+                  Effect.flatMap((payload) =>
+                    Effect.gen(function* () {
+                      if (
+                        (payload.type === "command_execution" || payload.type === "dynamic_tool") &&
+                        payload.status === "completed"
+                      ) {
+                        const rows = yield* sql<{ retained: number }>`
+                      SELECT json_extract(payload_json, '$.outputRetention.policyVersion') AS retained
+                      FROM orchestration_v2_projection_turn_items WHERE turn_item_id = ${payload.id}
+                    `;
+                        if (rows[0]?.retained === 1)
+                          return {
+                            ...event,
+                            payload: retainToolOutput(
+                              payload,
+                              DateTime.formatIso(yield* DateTime.now),
+                            ),
+                          };
+                      }
+                      return { ...event, payload };
+                    }),
+                  ),
+                )
             : Effect.succeed(event),
         { concurrency: 1 },
       );

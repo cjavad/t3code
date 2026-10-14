@@ -98,6 +98,7 @@ export class OrchestrationEventStore extends Context.Service<
         /** UTF-8 bytes in persisted payload JSON before decoding or wire projection. */
         readonly rawPayloadBytes: number;
         readonly hasCreateEvent: boolean;
+        readonly requiresSnapshot?: boolean;
       },
       OrchestrationEventStoreError
     >;
@@ -114,6 +115,7 @@ export class OrchestrationEventStore extends Context.Service<
         readonly eventCount: number;
         /** UTF-8 bytes in persisted payload JSON before decoding or wire projection. */
         readonly rawPayloadBytes: number;
+        readonly requiresSnapshot?: boolean;
       },
       OrchestrationEventStoreError
     >;
@@ -349,17 +351,12 @@ const makeEventStore = Effect.gen(function* () {
           ${request.eventId},
           'project',
           ${request.streamId},
-          COALESCE(
-            (
-              SELECT stream_version + 1
-              FROM orchestration_events
-              WHERE aggregate_kind = 'project'
-                AND stream_id = ${request.streamId}
-              ORDER BY stream_version DESC
-              LIMIT 1
-            ),
-            0
-          ),
+          MAX(
+            COALESCE((SELECT MAX(stream_version) FROM orchestration_events
+              WHERE aggregate_kind = 'project' AND stream_id = ${request.streamId}), -1),
+            COALESCE((SELECT stream_version FROM orchestration_storage_streams
+              WHERE aggregate_kind = 'project' AND stream_id = ${request.streamId}), -1)
+          ) + 1,
           ${request.type},
           ${request.occurredAt},
           ${request.commandId},
@@ -488,14 +485,12 @@ const makeEventStore = Effect.gen(function* () {
               ${event.id},
               'thread',
               ${event.threadId},
-              COALESCE(
-                (
-                  SELECT MAX(stream_version) + 1
-                  FROM orchestration_events
-                  WHERE aggregate_kind = 'thread' AND stream_id = ${event.threadId}
-                ),
-                0
-              ),
+              MAX(
+                COALESCE((SELECT MAX(stream_version) FROM orchestration_events
+                  WHERE aggregate_kind = 'thread' AND stream_id = ${event.threadId}), -1),
+                COALESCE((SELECT stream_version FROM orchestration_storage_streams
+                  WHERE aggregate_kind = 'thread' AND stream_id = ${event.threadId}), -1)
+              ) + 1,
               ${event.type},
               ${encoded.occurredAt},
               ${input.commandId ?? null},
@@ -573,6 +568,14 @@ const makeEventStore = Effect.gen(function* () {
     );
   };
 
+  const replayBoundary = (afterSequence: number) =>
+    sql<{ application_sequence: number }>`
+    SELECT application_sequence FROM orchestration_storage_baseline WHERE id = 1
+  `.pipe(
+      Effect.map((rows) => rows[0] !== undefined && afterSequence < rows[0].application_sequence),
+      Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.replayBoundary:query")),
+    );
+
   const getAgentReplayStats: OrchestrationEventStore["Service"]["getAgentReplayStats"] = (input) =>
     sql<{
       readonly eventCount: number;
@@ -596,11 +599,16 @@ const makeEventStore = Effect.gen(function* () {
       )
     `.pipe(
       Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.getAgentReplayStats:query")),
-      Effect.map((rows) => ({
-        eventCount: rows[0]?.eventCount ?? 0,
-        rawPayloadBytes: rows[0]?.rawPayloadBytes ?? 0,
-        hasCreateEvent: (rows[0]?.hasCreateEvent ?? 0) !== 0,
-      })),
+      Effect.flatMap((rows) =>
+        replayBoundary(input.afterSequence).pipe(
+          Effect.map((requiresSnapshot) => ({
+            ...(requiresSnapshot ? { requiresSnapshot: true } : {}),
+            eventCount: rows[0]?.eventCount ?? 0,
+            rawPayloadBytes: rows[0]?.rawPayloadBytes ?? 0,
+            hasCreateEvent: (rows[0]?.hasCreateEvent ?? 0) !== 0,
+          })),
+        ),
+      ),
     );
 
   const getReplayStats: OrchestrationEventStore["Service"]["getReplayStats"] = (input) =>
@@ -617,37 +625,44 @@ const makeEventStore = Effect.gen(function* () {
         )
     `.pipe(
       Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.getReplayStats:query")),
-      Effect.map((rows) => ({
-        eventCount: rows[0]?.eventCount ?? 0,
-        rawPayloadBytes: rows[0]?.rawPayloadBytes ?? 0,
-      })),
+      Effect.flatMap((rows) =>
+        replayBoundary(input.afterSequence).pipe(
+          Effect.map((requiresSnapshot) => ({
+            ...(requiresSnapshot ? { requiresSnapshot: true } : {}),
+            eventCount: rows[0]?.eventCount ?? 0,
+            rawPayloadBytes: rows[0]?.rawPayloadBytes ?? 0,
+          })),
+        ),
+      ),
     );
 
   const latestAgentSequence: OrchestrationEventStore["Service"]["latestAgentSequence"] = (
     threadId,
   ) =>
-    sql<{ readonly sequence: number | null }>`
-      SELECT MAX(sequence) AS sequence
-      FROM orchestration_events
-      ${
-        threadId === undefined
-          ? sql``
-          : sql`INDEXED BY idx_orchestration_events_agent_stream_sequence`
-      }
-      WHERE application_event_version = 2
-        AND aggregate_kind = 'thread'
-        ${threadId === undefined ? sql`` : sql`AND stream_id = ${threadId}`}
+    sql<{ sequence: number | null }>`
+      SELECT MAX(sequence) AS sequence FROM (
+        SELECT MAX(sequence) AS sequence FROM orchestration_events
+          ${threadId === undefined ? sql`INDEXED BY idx_orchestration_events_application_high_water` : sql`INDEXED BY idx_orchestration_events_agent_stream_sequence`}
+        WHERE application_event_version = 2 AND aggregate_kind = 'thread'
+          ${threadId === undefined ? sql`AND (aggregate_kind = 'project' OR (application_event_version = 2 AND aggregate_kind = 'thread'))` : sql``}
+          ${threadId === undefined ? sql`` : sql`AND stream_id = ${threadId}`}
+        UNION ALL
+        SELECT agent_sequence
+        FROM ${threadId === undefined ? sql`orchestration_storage_baseline` : sql`orchestration_storage_streams`}
+        WHERE ${threadId === undefined ? sql`id = 1` : sql`aggregate_kind = 'thread' AND stream_id = ${threadId}`}
+      )
     `.pipe(
       Effect.map((rows) => rows[0]?.sequence ?? 0),
       Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.latestAgentSequence:query")),
     );
 
-  // The OR planner otherwise scans every V2 event instead of seeking the final sequence.
-  const latestApplicationSequence = sql<{ readonly sequence: number | null }>`
-    SELECT MAX(sequence) AS sequence
-    FROM orchestration_events INDEXED BY idx_orchestration_events_application_high_water
-    WHERE aggregate_kind = 'project'
-      OR (application_event_version = 2 AND aggregate_kind = 'thread')
+  const latestApplicationSequence = sql<{ sequence: number | null }>`
+    SELECT MAX(sequence) AS sequence FROM (
+      SELECT MAX(sequence) AS sequence
+      FROM orchestration_events INDEXED BY idx_orchestration_events_application_high_water
+      WHERE aggregate_kind = 'project' OR (application_event_version = 2 AND aggregate_kind = 'thread')
+      UNION ALL SELECT application_sequence FROM orchestration_storage_baseline WHERE id = 1
+    )
   `.pipe(
     Effect.map((rows) => rows[0]?.sequence ?? 0),
     Effect.mapError(

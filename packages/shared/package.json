@@ -486,7 +486,14 @@
     "./PtyAdapter": {
       "types": "./src/PtyAdapter.ts",
       "import": "./src/PtyAdapter.ts"
-    }
+    },
+    "./compressedSqlite": {
+      "types": "./src/compressedSqlite.ts",
+      "import": "./src/compressedSqlite.ts"
+    },
+    "./sqliteStorageSchema": "./src/sqliteStorageSchema.ts",
+    "./compactSqliteDatabase": "./src/compactSqliteDatabase.ts",
+    "./toolOutputRetention": "./src/toolOutputRetention.ts"
   },
   "scripts": {
     "typecheck": "tsc-rs --noEmit",
