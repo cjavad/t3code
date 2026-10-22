@@ -30,7 +30,7 @@ touches, **refactor the patch to match** — never duct-tape around it.
 
 - **Identity & signing** — per-user Git identity / commit signing; `AuthUsers`.
 - **Cloud device ownership** — T3 Connect devices mapped to a user
-  (`CloudDevices`, migration 064); `cloud-connect` never gets a user row.
+  (`CloudDevices`, migration 1002); `cloud-connect` never gets a user row.
 - **Thread notes** — human-only messages (`role: "note"`) that never reach a
   provider, plus per-message author attribution.
 - **Rebase adaptation** — the minimum needed to compile and pass tests after
@@ -39,10 +39,12 @@ touches, **refactor the patch to match** — never duct-tape around it.
 
 ## Migrations
 
-Upstream's released range is contiguous `1..56`. **Fork migrations start at 63**,
-leaving `57-62` available for upstream changes. Check the manifest on every update;
-reserved gaps do not guarantee that future upstream IDs will remain free. Never edit
-a released migration — add a new one.
+Upstream currently uses `1..67`. Fork migrations are `1001` (users), `1002`
+(cloud devices), and `1003` (compressed storage). Released fork builds used
+63/64/65; `reconcileForkMigrationGap` moves those ledger entries by their exact
+names, preserves their timestamps, and applies missing upstream migrations in a
+transaction. It also fills future upstream gaps below 1001 on subsequent updates.
+Check the manifest on every update; never reuse an existing migration ID.
 
 The upstream test that asserts the exact id list is named after whatever
 upstream's newest released migration number currently is (it was
@@ -153,3 +155,11 @@ Known jbox-only test failures (environment, not regressions): the root-permissio
 tests (`cli/theme`, `keybindings`, `provider/acp/AcpRegistrySupport`,
 `terminal/Manager`) and `provider/acp/AcpSessionRuntime.processTree` (PATH
 lookup).
+
+## Pairing ownership
+
+Pairing labels describe devices. Use the separate person identity (or CLI
+`--subject javad`) to assign a person; blank remains unassigned. Authentication
+subjects such as `one-time-token` never become user records. Cookie and WebSocket
+verification use the persisted session subject so an ownership correction takes
+effect consistently without changing the session credential or permissions.

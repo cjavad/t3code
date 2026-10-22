@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "@effect/vitest";
 import { retainToolOutput } from "./toolOutputRetention.ts";
 const now = "2026-10-14T00:00:00.000Z";
 

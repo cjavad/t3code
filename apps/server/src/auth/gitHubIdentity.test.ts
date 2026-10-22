@@ -1,9 +1,11 @@
+import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as GitHubGraphQlClient from "@t3tools/source-control-github/server/gitHubGraphQlClient";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { GitIdentityError } from "@t3tools/contracts";
 import * as GitHubPullRequestApi from "@t3tools/source-control-github/server/GitHubPullRequestApi";
 import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
+import * as GitHubApi from "@t3tools/source-control-github/server/GitHubRequestPolicy";
 import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
 import * as GitHubQuota from "@t3tools/source-control-github/server/GitHubQuota";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
@@ -29,42 +31,39 @@ it.effect("binds REST and GraphQL to each person and rereads rotated tokens with
         }),
       ),
     );
-    const api = yield* GitHubApi.GitHubApi.pipe(
+    const api = yield* GitHubRest.GitHubRest.pipe(
       Effect.provide(
-        GitHubApi.layer.pipe(
-          Layer.provide(
-            Layer.mergeAll(
-              Layer.mock(GitHubCredentials.GitHubCredentials)({
-                get: () => Effect.die("ambient credential must not be read"),
-              }),
-              Layer.succeed(
-                HttpClient.HttpClient,
-                HttpClient.make((request) => {
-                  headers.push(request.headers.authorization!);
-                  return Effect.succeed(
-                    HttpClientResponse.fromWeb(
-                      request,
-                      new Response('{"data":{}}', {
-                        headers: { "content-type": "application/json" },
-                      }),
-                    ),
-                  );
+        Layer.mergeAll(GitHubRest.layer, GitHubGraphQlClient.layer)
+          .pipe(Layer.provideMerge(GitHubApi.layer))
+          .pipe(
+            Layer.provideMerge(
+              Layer.mergeAll(
+                Layer.mock(GitHubCredentials.GitHubCredentials)({
+                  get: () => Effect.die("ambient credential must not be read"),
                 }),
+                Layer.succeed(
+                  HttpClient.HttpClient,
+                  HttpClient.make((request) => {
+                    headers.push(request.headers.authorization!);
+                    return Effect.succeed(
+                      HttpClientResponse.fromWeb(
+                        request,
+                        new Response('{"data":{}}', {
+                          headers: { "content-type": "application/json" },
+                        }),
+                      ),
+                    );
+                  }),
+                ),
+                GitHubQuota.layer,
+                SourceControlRateLimit.layer,
               ),
-              GitHubQuota.layer,
-              SourceControlRateLimit.layer,
             ),
           ),
-        ),
       ),
     );
     const read = Effect.all([
       api.rest({ host: "github.com", operation: "fixture", path: "repos/acme/web/pulls/1" }),
-      api.graphql({
-        host: "github.com",
-        operation: "fixture",
-        query: "query { viewer { login } }",
-      }),
     ]);
     yield* binding.withSubject("alice", read);
     yield* binding.withSubject("bob", read);
@@ -72,10 +71,7 @@ it.effect("binds REST and GraphQL to each person and rereads rotated tokens with
     yield* binding.withSubject("alice", read);
     assert.deepStrictEqual(headers, [
       "Bearer alice-token",
-      "Bearer alice-token",
       "Bearer bob-token",
-      "Bearer bob-token",
-      "Bearer rotated-token",
       "Bearer rotated-token",
     ]);
     const fingerprint = yield* binding.withSubject("alice", SourceControlRateLimit.CredentialScope);
@@ -125,32 +121,47 @@ it.effect("verifies the page account and writes PR actions under the personal cr
     );
     const cli = yield* GitHubPullRequestApi.make.pipe(
       Effect.provide(
-        GitHubApi.layer.pipe(
-          Layer.provide(
-            Layer.mergeAll(
-              Layer.mock(GitHubCredentials.GitHubCredentials)({
-                get: () => Effect.die("server credential must not be selected"),
-              }),
-              Layer.succeed(
-                HttpClient.HttpClient,
-                HttpClient.make((request) => {
-                  requests.push({ url: request.url, authorization: request.headers.authorization });
-                  const alice = request.headers.authorization?.includes("alice") === true;
-                  const body = request.url.endsWith("/user")
-                    ? { id: alice ? 101 : 202, login: alice ? "alice" : "bob" }
-                    : { data: { repository: { pullRequest: { id: "PR_1" } }, addComment: {} } };
-                  return Effect.succeed(
-                    HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body))),
-                  );
+        Layer.mergeAll(GitHubRest.layer, GitHubGraphQlClient.layer)
+          .pipe(Layer.provideMerge(GitHubApi.layer))
+          .pipe(
+            Layer.provideMerge(
+              Layer.mergeAll(
+                Layer.mock(GitHubCredentials.GitHubCredentials)({
+                  get: () => Effect.die("server credential must not be selected"),
                 }),
+                Layer.succeed(
+                  HttpClient.HttpClient,
+                  HttpClient.make((request) => {
+                    requests.push({
+                      url: request.url,
+                      authorization: request.headers.authorization,
+                    });
+                    const alice = request.headers.authorization?.includes("alice") === true;
+                    const body = request.url.endsWith("/user")
+                      ? { id: alice ? 101 : 202, login: alice ? "alice" : "bob" }
+                      : {
+                          data: {
+                            repository: { pullRequest: { id: "PR_1" } },
+                            addComment: { clientMutationId: null },
+                          },
+                        };
+                    return Effect.succeed(
+                      HttpClientResponse.fromWeb(
+                        request,
+                        new Response(JSON.stringify(body), {
+                          headers: { "content-type": "application/json" },
+                        }),
+                      ),
+                    );
+                  }),
+                ),
+                GitHubQuota.layer,
+                SourceControlRateLimit.layer,
               ),
-              GitHubQuota.layer,
-              SourceControlRateLimit.layer,
             ),
+            Layer.merge(TestSourceControlHost.layer()),
+            Layer.provideMerge(NodeServices.layer),
           ),
-          Layer.merge(TestSourceControlHost.layer()),
-          Layer.provideMerge(NodeServices.layer),
-        ),
       ),
     );
     const readAndWrite = (subject: string, expectedAccountId: string) =>

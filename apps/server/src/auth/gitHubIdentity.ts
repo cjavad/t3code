@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - credential namespaces match GitHubCredentials.
 import * as NodeCrypto from "node:crypto";
 import type { OrchestrationV2ThreadGitIdentity } from "@t3tools/contracts";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
+import * as GitHubApi from "@t3tools/source-control-github/server/GitHubRequestPolicy";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";

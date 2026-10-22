@@ -1,7 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off -- Verifies persisted Node crypto digest compatibility.
 import * as NodeCrypto from "node:crypto";
 import * as NodeSqlite from "node:sqlite";
 import * as NodeZlib from "node:zlib";
-import { expect, it } from "vitest";
+import { expect, it } from "@effect/vitest";
 import { decodeStorageChunk, registerCompressedSqlite } from "./compressedSqlite.ts";
 import { STORAGE_SCHEMA } from "./sqliteStorageSchema.ts";
 

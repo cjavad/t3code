@@ -33,3 +33,24 @@ it.layer(testLayer)("AuthUserRepository", (it) => {
     }),
   );
 });
+
+it.layer(testLayer)("technical principals", (it) => {
+  it.effect.each([
+    "one-time-token",
+    "desktop-bootstrap",
+    "administrative-bootstrap",
+    "reusable-dev-token-child",
+    "mcp-client",
+    "cloud-connect",
+  ])("does not create a person for %s", (subject) =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const repository = yield* AuthUserRepository;
+      const error = yield* repository
+        .ensureForSubject({ subject, now: "2026-10-22T00:00:00Z" })
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "PersistenceSqlError");
+      assert.equal(yield* repository.getBySubject(subject), null);
+    }),
+  );
+});

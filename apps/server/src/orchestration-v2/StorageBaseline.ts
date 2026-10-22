@@ -1,3 +1,4 @@
+import { canonicalizeThreadPullRequestProjections } from "../persistence/Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
 // @effect-diagnostics nodeBuiltinImport:off - baseline digest uses the same format as the offline exporter.
 import * as NodeCrypto from "node:crypto";
 import {
@@ -16,6 +17,9 @@ const decodeColumns = Schema.decodeEffect(Schema.fromJsonString(Schema.Array(Sch
 /** Called inside the rebuild transaction. Auth, receipts and effects are never restored. */
 export const restoreStorageBaseline = Effect.fn("StorageBaseline.restore")(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const installed =
+    yield* sql`SELECT name FROM sqlite_master WHERE type='table' AND name='orchestration_storage_baseline'`;
+  if (installed.length === 0) return { applicationSequence: 0, agentSequence: 0 };
   const baseline = yield* sql<{
     format_version: number;
     application_sequence: number;
@@ -87,6 +91,8 @@ export const restoreStorageBaseline = Effect.fn("StorageBaseline.restore")(funct
     if (count !== table.row_count || hash.digest("hex") !== table.sha256)
       throw new Error("Storage baseline failed verification");
   }
+  // Older immutable baselines predate the upstream PR link migration.
+  yield* canonicalizeThreadPullRequestProjections();
   return {
     applicationSequence: boundary.application_sequence,
     agentSequence: boundary.agent_sequence,

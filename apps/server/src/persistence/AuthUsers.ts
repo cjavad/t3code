@@ -37,6 +37,20 @@ export class AuthUserRepository extends Context.Service<
   }
 >()("t3/persistence/AuthUsers/AuthUserRepository") {}
 
+const TECHNICAL_SUBJECTS = new Set([
+  "one-time-token",
+  "desktop-bootstrap",
+  "browser",
+  "administrative-bootstrap",
+  "reusable-dev-token",
+  "reusable-dev-token-child",
+  "cli-issued-session",
+  "mcp-client",
+  "cloud-connect",
+]);
+export const isHumanAuthSubject = (subject: string): boolean =>
+  subject.trim().length > 0 && !TECHNICAL_SUBJECTS.has(subject);
+
 const userIdForSubject = (subject: string): string => `user:${subject}`;
 
 const RawAuthUserRecord = Schema.Struct({
@@ -97,24 +111,31 @@ export const make = Effect.gen(function* () {
     );
 
   const ensureForSubject: AuthUserRepository["Service"]["ensureForSubject"] = (input) =>
-    sql`
+    !isHumanAuthSubject(input.subject)
+      ? Effect.fail(
+          new PersistenceSqlError({
+            operation: "AuthUserRepository.ensureForSubject",
+            detail: "An authentication method is not a person identity.",
+          }),
+        )
+      : sql`
       INSERT INTO auth_users (id, subject, display_name, created_at, updated_at)
       VALUES (${userIdForSubject(input.subject)}, ${input.subject}, ${input.subject}, ${input.now}, ${input.now})
       ON CONFLICT(subject) DO NOTHING
     `.pipe(
-      Effect.mapError(toPersistenceSqlError("AuthUserRepository.ensureForSubject:insert")),
-      Effect.andThen(readBySubject(input.subject)),
-      Effect.flatMap((user) =>
-        user === null
-          ? Effect.fail(
-              new PersistenceSqlError({
-                operation: "AuthUserRepository.ensureForSubject:readback",
-                detail: "The auth user row was not created.",
-              }),
-            )
-          : Effect.succeed(user),
-      ),
-    );
+          Effect.mapError(toPersistenceSqlError("AuthUserRepository.ensureForSubject:insert")),
+          Effect.andThen(readBySubject(input.subject)),
+          Effect.flatMap((user) =>
+            user === null
+              ? Effect.fail(
+                  new PersistenceSqlError({
+                    operation: "AuthUserRepository.ensureForSubject:readback",
+                    detail: "The auth user row was not created.",
+                  }),
+                )
+              : Effect.succeed(user),
+          ),
+        );
 
   const getBySubject: AuthUserRepository["Service"]["getBySubject"] = readBySubject;
 
@@ -131,6 +152,7 @@ export const make = Effect.gen(function* () {
 
   const list: AuthUserRepository["Service"]["list"] = () =>
     readAllRows(undefined).pipe(
+      Effect.map((rows) => rows.filter((row) => isHumanAuthSubject(row.subject))),
       Effect.flatMap(Effect.forEach((row) => decodeAuthUser(row))),
       Effect.mapError(toPersistenceSqlError("AuthUserRepository.list:query")),
     );

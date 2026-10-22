@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off -- SQLite UDFs are synchronous and use the persisted Node crypto digest format.
 import * as NodeCrypto from "node:crypto";
 import * as NodeSqlite from "node:sqlite";
 import * as NodeZlib from "node:zlib";

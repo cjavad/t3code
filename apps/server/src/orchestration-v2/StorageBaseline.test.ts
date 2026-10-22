@@ -57,6 +57,12 @@ const thread: OrchestrationV2AppThread = {
   createdBy: "user",
   creationSource: "web",
   title: "baseline",
+  linkedPullRequest: {
+    projectId: ProjectId.make("project:storage"),
+    repository: "acme/web",
+    number: 42,
+    url: "https://github.com/acme/web/pull/42",
+  },
   providerInstanceId,
   modelSelection: { instanceId: providerInstanceId, model: "gpt-5.4" },
   runtimeMode: "full-access",
@@ -139,6 +145,10 @@ it.effect(
               },
             ],
           });
+          expect((yield* maintenance.rebuild).valid).toBe(true);
+          expect(
+            (yield* projections.getThreadProjection(threadId)).thread.pullRequests?.[0],
+          ).toMatchObject({ number: 42, host: "github.com" });
           const retainedItem = (yield* projections.getThreadProjection(threadId)).turnItems[0]!;
           expect(retainedItem).toHaveProperty("outputRetention.policyVersion", 1);
           expect(retainedItem).not.toHaveProperty("output", item.output);
@@ -156,6 +166,7 @@ it.effect(
           expect(appended[0]!.sequence).toBeGreaterThan(report.applicationSequence);
           expect((yield* maintenance.rebuild).valid).toBe(true);
           expect((yield* projections.getThreadProjection(threadId)).thread.title).toBe("tail");
+
           // A corrupt recovery chunk must roll the whole rebuild transaction back.
           const sql = yield* SqlClient.SqlClient;
           yield* sql`UPDATE orchestration_storage_chunks SET sha256 = 'corrupt' WHERE table_name = 'orchestration_v2_projection_threads'`;

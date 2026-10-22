@@ -64,7 +64,7 @@ function pullRequestMatchesProject(
   );
 }
 
-export const resolveProjectForPullRequestDiscovery = Effect.fn(
+const resolveProjectForPullRequestDiscovery = Effect.fn(
   "ThreadPullRequestServiceV2.resolveProject",
 )(function* (
   project: OrchestrationProjectShell,
@@ -122,12 +122,6 @@ export const make = Effect.gen(function* () {
     }
   };
 
-  /**
-   * A sweep for one thread reads only that thread's shell, not every thread's.
-   * Finished runs and checkpoints queue one of these each. A sweep over all
-   * threads reads only active, unsettled ones, since discovery skips the rest;
-   * backfill looks up settled threads, so its passes read every active thread.
-   */
   const readThreadSnapshot = ({ threadId, backfill }: RefreshRequest) =>
     threadId === null
       ? orchestrator
@@ -135,8 +129,6 @@ export const make = Effect.gen(function* () {
             location: "active",
             unsettledOnly: !(backfill || pendingBackfill.size > 0),
           })
-          // Reads every active thread once a minute: run it off the event loop. Writes keep
-          // landing during the read, and the snapshot's sequence guards the sync against them.
           .pipe(NodeSqliteClient.readOnly)
       : Effect.gen(function* () {
           // Read the sequence first. The thread is then at least this new, so a
@@ -164,9 +156,6 @@ export const make = Effect.gen(function* () {
         }
       }
     }
-    // A single-thread read only shows whether its own thread is gone. A thread
-    // with no branch has nothing to look up, and its entry would keep every
-    // periodic pass on the full read.
     const visibleThreadIds = new Set(
       threadSnapshot.threads.filter((thread) => thread.branch !== null).map((thread) => thread.id),
     );
@@ -194,168 +183,168 @@ export const make = Effect.gen(function* () {
     yield* Effect.forEach(
       groups.values(),
       (group) =>
-        githubIdentity
-          .withThreadIdentity(
-            group[0]!.gitIdentity,
-            Effect.gen(function* () {
-              const first = group[0]!;
-              const project = projects.get(first.projectId);
-              if (project === undefined) return finishBackfill(group);
-              const { project: resolvedProject, repository } =
-                yield* resolveProjectForPullRequestDiscovery(project, repositoryIdentities, {
-                  refresh: request.refresh,
-                });
-              if (first.branch !== null && repository === null) return finishBackfill(group);
-              const worktreeExists =
-                first.worktreePath !== null && (yield* fileSystem.exists(first.worktreePath));
-              const cwd =
-                worktreeExists && first.worktreePath !== null
-                  ? first.worktreePath
-                  : project.workspaceRoot;
-              const detected =
-                first.branch === null
-                  ? null
-                  : yield* git.branchPullRequest(
-                      { cwd, branch: first.branch },
-                      { refresh: request.refresh },
-                    );
-              if (detected !== null && !pullRequestMatchesProject(detected, resolvedProject)) {
-                return finishBackfill(group);
+        githubIdentity.withThreadIdentity(
+          group[0]!.gitIdentity,
+          Effect.gen(function* () {
+            const first = group[0]!;
+            const project = projects.get(first.projectId);
+            if (project === undefined) return finishBackfill(group);
+            const { project: resolvedProject, repository } =
+              yield* resolveProjectForPullRequestDiscovery(project, repositoryIdentities, {
+                refresh: request.refresh,
+              });
+            if (first.branch !== null && repository === null) return finishBackfill(group);
+            const worktreeExists =
+              first.worktreePath !== null && (yield* fileSystem.exists(first.worktreePath));
+            const cwd =
+              worktreeExists && first.worktreePath !== null
+                ? first.worktreePath
+                : project.workspaceRoot;
+            const detected =
+              first.branch === null
+                ? null
+                : yield* git.branchPullRequest(
+                    { cwd, branch: first.branch },
+                    { refresh: request.refresh },
+                  );
+            if (detected !== null && !pullRequestMatchesProject(detected, resolvedProject)) {
+              return finishBackfill(group);
+            }
+            const detectedReference =
+              detected !== null && repository !== null
+                ? {
+                    projectId: project.id,
+                    repository,
+                    number: detected.number,
+                    url: detected.url,
+                  }
+                : null;
+
+            const plans = yield* Effect.forEach(group, (thread) =>
+              Effect.gen(function* () {
+                let branchPullRequest = detectedReference;
+                if (
+                  branchPullRequest === null &&
+                  thread.branch !== null &&
+                  thread.worktreePath === null &&
+                  thread.branchPullRequest != null
+                ) {
+                  const previous = yield* pullRequests.summary(thread.branchPullRequest, {
+                    recoverTransientFailure: false,
+                  });
+                  if (
+                    previous.headBranch === thread.branch &&
+                    (previous.state === "merged" || previous.state === "closed")
+                  ) {
+                    branchPullRequest = thread.branchPullRequest;
+                  }
+                }
+
+                let replacement: ThreadLinkedPullRequest | undefined;
+                if (
+                  (thread.pullRequests ?? []).length === 0 &&
+                  thread.linkedPullRequest != null &&
+                  detected?.state === "open" &&
+                  detectedReference !== null &&
+                  !samePullRequest(thread.linkedPullRequest, detectedReference)
+                ) {
+                  const linked = yield* pullRequests.summary(thread.linkedPullRequest, {
+                    recoverTransientFailure: false,
+                  });
+                  if (linked.state === "merged" || linked.state === "closed") {
+                    replacement = detectedReference;
+                  }
+                }
+                if (
+                  samePullRequest(thread.branchPullRequest, branchPullRequest) &&
+                  replacement === undefined
+                ) {
+                  pendingBackfill.delete(thread.id);
+                  return null;
+                }
+                return { thread, branchPullRequest, replacement };
+              }).pipe(
+                Effect.catchCauseIf(
+                  (cause) => !Cause.hasInterruptsOnly(cause),
+                  (cause) =>
+                    Effect.logWarning("thread pull request discovery failed", {
+                      threadId: thread.id,
+                      cause: Cause.pretty(cause),
+                    }).pipe(
+                      Effect.tap(() => Effect.sync(() => failBackfill([thread]))),
+                      Effect.as(null),
+                    ),
+                ),
+              ),
+            );
+            const updates = plans.filter((plan) => plan !== null);
+            if (updates.length === 0) return;
+
+            if (detected !== null && first.branch !== null) {
+              const current = yield* git.branchPullRequest(
+                { cwd, branch: first.branch },
+                { freshGitState: true },
+              );
+              const currentIdentity = yield* repositoryIdentities.resolve(project.workspaceRoot, {
+                refresh: true,
+              });
+              if (
+                current === null ||
+                current.number !== detected.number ||
+                current.url !== detected.url ||
+                current.state !== detected.state ||
+                current.repositoryKey !== detected.repositoryKey ||
+                !pullRequestMatchesProject(current, {
+                  ...project,
+                  repositoryIdentity: currentIdentity,
+                })
+              ) {
+                return failBackfill(updates.map((update) => update.thread));
               }
-              const detectedReference =
-                detected !== null && repository !== null
-                  ? {
-                      projectId: project.id,
-                      repository,
-                      number: detected.number,
-                      url: detected.url,
-                    }
-                  : null;
+            }
 
-              const plans = yield* Effect.forEach(group, (thread) =>
+            yield* Effect.forEach(
+              updates,
+              ({ thread, branchPullRequest, replacement }) =>
                 Effect.gen(function* () {
-                  let branchPullRequest = detectedReference;
-                  if (
-                    branchPullRequest === null &&
-                    thread.branch !== null &&
-                    thread.worktreePath === null &&
-                    thread.branchPullRequest != null
-                  ) {
-                    const previous = yield* pullRequests.summary(thread.branchPullRequest, {
-                      recoverTransientFailure: false,
-                    });
-                    if (previous.state === "merged" || previous.state === "closed") {
-                      branchPullRequest = thread.branchPullRequest;
-                    }
+                  // Discovery can perform network I/O. Re-read the project at
+                  // the transaction boundary so a deleted project or changed
+                  // workspace root cannot apply a result from the old checkout.
+                  const currentProject = yield* projectStore.getShell(project.id);
+                  if (!projectWorkspaceMatchesSnapshot(currentProject, project.workspaceRoot)) {
+                    return failBackfill([thread]);
                   }
-
-                  let replacement: ThreadLinkedPullRequest | undefined;
-                  if (
-                    (thread.pullRequests ?? []).length === 0 &&
-                    thread.linkedPullRequest != null &&
-                    detected?.state === "open" &&
-                    detectedReference !== null &&
-                    !samePullRequest(thread.linkedPullRequest, detectedReference)
-                  ) {
-                    const linked = yield* pullRequests.summary(thread.linkedPullRequest, {
-                      recoverTransientFailure: false,
-                    });
-                    if (linked.state === "merged" || linked.state === "closed") {
-                      replacement = detectedReference;
-                    }
-                  }
-                  if (
-                    samePullRequest(thread.branchPullRequest, branchPullRequest) &&
-                    replacement === undefined
-                  ) {
-                    pendingBackfill.delete(thread.id);
-                    return null;
-                  }
-                  return { thread, branchPullRequest, replacement };
+                  const uuid = yield* crypto.randomUUIDv4();
+                  yield* orchestrator.dispatch({
+                    type: "thread.pull-request.sync",
+                    commandId: CommandId.make(`server:thread-pull-request:${thread.id}:${uuid}`),
+                    threadId: thread.id,
+                    projectId: project.id,
+                    snapshotSequence: threadSnapshot.snapshotSequence,
+                    expected: {
+                      workspaceRoot: project.workspaceRoot,
+                      branch: thread.branch,
+                      worktreePath: thread.worktreePath,
+                      linkedPullRequest: thread.linkedPullRequest ?? null,
+                      branchPullRequest: thread.branchPullRequest ?? null,
+                    },
+                    branchPullRequest,
+                    ...(replacement === undefined ? {} : { linkedPullRequest: replacement }),
+                  });
+                  pendingBackfill.delete(thread.id);
                 }).pipe(
-                  Effect.catchCauseIf(
-                    (cause) => !Cause.hasInterruptsOnly(cause),
-                    (cause) =>
-                      Effect.logWarning("thread pull request discovery failed", {
-                        threadId: thread.id,
-                        cause: Cause.pretty(cause),
-                      }).pipe(
-                        Effect.tap(() => Effect.sync(() => failBackfill([thread]))),
-                        Effect.as(null),
-                      ),
+                  Effect.catchCause((cause) =>
+                    Cause.hasInterruptsOnly(cause)
+                      ? Effect.failCause(cause)
+                      : Effect.logWarning("thread pull request update failed", {
+                          threadId: thread.id,
+                          cause: Cause.pretty(cause),
+                        }).pipe(Effect.tap(() => Effect.sync(() => failBackfill([thread])))),
                   ),
                 ),
-              );
-              const updates = plans.filter((plan) => plan !== null);
-              if (updates.length === 0) return;
-
-              if (detected !== null && first.branch !== null) {
-                const current = yield* git.branchPullRequest(
-                  { cwd, branch: first.branch },
-                  { freshGitState: true },
-                );
-                const currentIdentity = yield* repositoryIdentities.resolve(project.workspaceRoot, {
-                  refresh: true,
-                });
-                if (
-                  current === null ||
-                  current.number !== detected.number ||
-                  current.url !== detected.url ||
-                  current.state !== detected.state ||
-                  current.repositoryKey !== detected.repositoryKey ||
-                  !pullRequestMatchesProject(current, {
-                    ...project,
-                    repositoryIdentity: currentIdentity,
-                  })
-                ) {
-                  return failBackfill(updates.map((update) => update.thread));
-                }
-              }
-
-              yield* Effect.forEach(
-                updates,
-                ({ thread, branchPullRequest, replacement }) =>
-                  Effect.gen(function* () {
-                    // Discovery can perform network I/O. Re-read the project at
-                    // the transaction boundary so a deleted project or changed
-                    // workspace root cannot apply a result from the old checkout.
-                    const currentProject = yield* projectStore.getShell(project.id);
-                    if (!projectWorkspaceMatchesSnapshot(currentProject, project.workspaceRoot)) {
-                      return failBackfill([thread]);
-                    }
-                    const uuid = yield* crypto.randomUUIDv4();
-                    yield* orchestrator.dispatch({
-                      type: "thread.pull-request.sync",
-                      commandId: CommandId.make(`server:thread-pull-request:${thread.id}:${uuid}`),
-                      threadId: thread.id,
-                      projectId: project.id,
-                      snapshotSequence: threadSnapshot.snapshotSequence,
-                      expected: {
-                        workspaceRoot: project.workspaceRoot,
-                        branch: thread.branch,
-                        worktreePath: thread.worktreePath,
-                        linkedPullRequest: thread.linkedPullRequest ?? null,
-                        branchPullRequest: thread.branchPullRequest ?? null,
-                      },
-                      branchPullRequest,
-                      ...(replacement === undefined ? {} : { linkedPullRequest: replacement }),
-                    });
-                    pendingBackfill.delete(thread.id);
-                  }).pipe(
-                    Effect.catchCause((cause) =>
-                      Cause.hasInterruptsOnly(cause)
-                        ? Effect.failCause(cause)
-                        : Effect.logWarning("thread pull request update failed", {
-                            threadId: thread.id,
-                            cause: Cause.pretty(cause),
-                          }).pipe(Effect.tap(() => Effect.sync(() => failBackfill([thread])))),
-                    ),
-                  ),
-                { discard: true },
-              );
-            }),
-          )
-          .pipe(
+              { discard: true },
+            );
+          }).pipe(
             Effect.catchCauseIf(
               (cause) => !Cause.hasInterruptsOnly(cause),
               (cause) =>
@@ -365,6 +354,7 @@ export const make = Effect.gen(function* () {
                 }).pipe(Effect.tap(() => Effect.sync(() => failBackfill(group)))),
             ),
           ),
+        ),
       // Wide enough that a sweep's GitHub branch lookups reach the GitHub provider together and share one
       // GraphQL document, instead of one `gh pr list` per branch.
       { concurrency: 32, discard: true },
