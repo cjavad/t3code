@@ -744,7 +744,9 @@ export function SourceControlSettingsPanel() {
         />
       )}
 
-      {environmentId !== null ? <GitIdentitySettings environmentId={environmentId} /> : null}
+      {environmentId !== null ? (
+        <GitIdentitySettings key={environmentId} environmentId={environmentId} />
+      ) : null}
 
       <SourceControlWritingSettingsSection />
     </SettingsPageContainer>

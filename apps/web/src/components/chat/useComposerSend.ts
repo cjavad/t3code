@@ -468,11 +468,18 @@ export function useComposerSend(input: ComposerSendInput) {
         toastManager.add({ type: "warning", title: "Send a first message before leaving a note." });
         return;
       }
-      const body = promptRef.current.trimStart().slice(noteMatch[0].length);
-      promptRef.current = body;
-      setComposerDraftPrompt(composerDraftTarget, body);
-      composerRef.current?.resetCursorState();
+      if (queuedRunEdit.isEditing) {
+        toastManager.add({
+          type: "warning",
+          title: "Finish editing the queued message before leaving a note.",
+        });
+        return;
+      }
     }
+    const promptForSubmission =
+      noteMatch === null
+        ? promptRef.current
+        : promptRef.current.trimStart().slice(noteMatch[0].length);
     const sendCtx = composerRef.current?.getSendContext();
     if (!noteMode && activePendingProgress && sendCtx?.answeringPendingUserInput !== false) {
       if (directAnnotation) {
@@ -539,10 +546,10 @@ export function useComposerSend(input: ComposerSendInput) {
     // A direct "send annotation" writes the draft and sends in the same tick; the reference
     // must be in the text now, not after the next render.
     const promptForSend = directAnnotation
-      ? ensureInlineContextReferences(promptRef.current, [
+      ? ensureInlineContextReferences(promptForSubmission, [
           previewAnnotationContextReference(directAnnotation.annotation),
         ])
-      : promptRef.current;
+      : promptForSubmission;
     const strandedThread = threadContextsOutsideEnvironment({
       text: promptForSend,
       records: composerThreadContexts,
@@ -1341,15 +1348,19 @@ export function useComposerSend(input: ComposerSendInput) {
           const next = existing.filter((message) => message.id !== messageIdForSend);
           return next.length === existing.length ? existing : next;
         });
-        const retryComposerImages = restoreComposerDraft(composerDraftTarget, sendSnapshot);
+        const retryPrompt = noteMode ? `/note ${messageTextForSend}` : messageTextForSend;
+        const retryComposerImages = restoreComposerDraft(composerDraftTarget, {
+          ...sendSnapshot,
+          messageText: retryPrompt,
+        });
         if (currentRouteThreadKeyRef.current === routeThreadKey) {
-          promptRef.current = noteMode ? `/note ${messageTextForSend}` : messageTextForSend;
+          promptRef.current = retryPrompt;
           composerImagesRef.current = retryComposerImages;
           composerFilesRef.current = composerFilesSnapshot;
           composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
           composerRef.current?.resetCursorState({
-            cursor: collapseExpandedComposerCursor(messageTextForSend, messageTextForSend.length),
-            prompt: messageTextForSend,
+            cursor: collapseExpandedComposerCursor(retryPrompt, retryPrompt.length),
+            prompt: retryPrompt,
             detectTrigger: true,
           });
         }
