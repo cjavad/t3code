@@ -70,41 +70,40 @@ export const make = Effect.gen(function* () {
     };
   };
 
-  const readProfile = (subject: string) =>
-    Effect.gen(function* () {
-      const stored = yield* secrets.get(names(subject).profile).pipe(
-        Effect.mapError(
-          () =>
-            new GitIdentityError({
-              reason: "storage",
-              detail: "The Git identity profile could not be read.",
-            }),
-        ),
-      );
-      if (Option.isNone(stored)) return null;
-      try {
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
-        const parsed = JSON.parse(new TextDecoder().decode(stored.value)) as StoredProfile;
-        if (
-          typeof parsed.displayName !== "string" ||
-          typeof parsed.email !== "string" ||
-          typeof parsed.githubUsername !== "string" ||
-          typeof parsed.signingKey !== "string" ||
-          typeof parsed.githubTokenConfigured !== "boolean"
-        ) {
-          return yield* new GitIdentityError({
+  const readProfile = Effect.fn("GitIdentityService.readProfile")(function* (subject: string) {
+    const stored = yield* secrets.get(names(subject).profile).pipe(
+      Effect.mapError(
+        () =>
+          new GitIdentityError({
             reason: "storage",
-            detail: "The stored Git identity profile is invalid.",
-          });
-        }
-        return parsed;
-      } catch {
+            detail: "The Git identity profile could not be read.",
+          }),
+      ),
+    );
+    if (Option.isNone(stored)) return null;
+    try {
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const parsed = JSON.parse(new TextDecoder().decode(stored.value)) as StoredProfile;
+      if (
+        typeof parsed.displayName !== "string" ||
+        typeof parsed.email !== "string" ||
+        typeof parsed.githubUsername !== "string" ||
+        typeof parsed.signingKey !== "string" ||
+        typeof parsed.githubTokenConfigured !== "boolean"
+      ) {
         return yield* new GitIdentityError({
           reason: "storage",
-          detail: "The stored Git identity profile could not be decoded.",
+          detail: "The stored Git identity profile is invalid.",
         });
       }
-    });
+      return parsed;
+    } catch {
+      return yield* new GitIdentityError({
+        reason: "storage",
+        detail: "The stored Git identity profile could not be decoded.",
+      });
+    }
+  });
 
   const persistProfile = (subject: string, profile: GitIdentityProfile) =>
     secrets.set(names(subject).profile, new TextEncoder().encode(JSON.stringify(profile))).pipe(
@@ -117,62 +116,64 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const generateKey = (subject: string, email: string) =>
-    Effect.gen(function* () {
-      const keyNames = names(subject);
-      const temporaryBase = path.join(
-        config.secretsDir,
-        `git-identity-generate-${subjectKey(subject)}-${NodeCrypto.randomUUID()}`,
-      );
-      yield* process
-        .run({
-          operation: "GitIdentityService.generateKey",
-          command: "ssh-keygen",
-          args: ["-q", "-t", "ed25519", "-N", "", "-C", email, "-f", temporaryBase],
-          cwd: config.secretsDir,
-          timeoutMs: 30_000,
-        })
-        .pipe(
-          Effect.mapError(
-            () =>
-              new GitIdentityError({
-                reason: "key_generation_failed",
-                detail: "ssh-keygen could not create a signing key on the server.",
-              }),
-          ),
-        );
-      const privateKey = yield* fileSystem.readFile(temporaryBase).pipe(
+  const generateKey = Effect.fn("GitIdentityService.generateKey")(function* (
+    subject: string,
+    email: string,
+  ) {
+    const keyNames = names(subject);
+    const temporaryBase = path.join(
+      config.secretsDir,
+      `git-identity-generate-${subjectKey(subject)}-${NodeCrypto.randomUUID()}`,
+    );
+    yield* process
+      .run({
+        operation: "GitIdentityService.generateKey",
+        command: "ssh-keygen",
+        args: ["-q", "-t", "ed25519", "-N", "", "-C", email, "-f", temporaryBase],
+        cwd: config.secretsDir,
+        timeoutMs: 30_000,
+      })
+      .pipe(
         Effect.mapError(
           () =>
             new GitIdentityError({
               reason: "key_generation_failed",
-              detail: "The generated signing key could not be read.",
+              detail: "ssh-keygen could not create a signing key on the server.",
             }),
         ),
       );
-      const publicKey = yield* fileSystem.readFileString(`${temporaryBase}.pub`).pipe(
-        Effect.map((value) => value.trim()),
-        Effect.mapError(
-          () =>
-            new GitIdentityError({
-              reason: "key_generation_failed",
-              detail: "The generated public signing key could not be read.",
-            }),
-        ),
-      );
-      yield* secrets.set(keyNames.privateKey, privateKey).pipe(
-        Effect.mapError(
-          () =>
-            new GitIdentityError({
-              reason: "storage",
-              detail: "The signing key could not be stored securely.",
-            }),
-        ),
-      );
-      yield* fileSystem.remove(temporaryBase).pipe(Effect.ignore);
-      yield* fileSystem.remove(`${temporaryBase}.pub`).pipe(Effect.ignore);
-      return publicKey;
-    });
+    const privateKey = yield* fileSystem.readFile(temporaryBase).pipe(
+      Effect.mapError(
+        () =>
+          new GitIdentityError({
+            reason: "key_generation_failed",
+            detail: "The generated signing key could not be read.",
+          }),
+      ),
+    );
+    const publicKey = yield* fileSystem.readFileString(`${temporaryBase}.pub`).pipe(
+      Effect.map((value) => value.trim()),
+      Effect.mapError(
+        () =>
+          new GitIdentityError({
+            reason: "key_generation_failed",
+            detail: "The generated public signing key could not be read.",
+          }),
+      ),
+    );
+    yield* secrets.set(keyNames.privateKey, privateKey).pipe(
+      Effect.mapError(
+        () =>
+          new GitIdentityError({
+            reason: "storage",
+            detail: "The signing key could not be stored securely.",
+          }),
+      ),
+    );
+    yield* fileSystem.remove(temporaryBase).pipe(Effect.ignore);
+    yield* fileSystem.remove(`${temporaryBase}.pub`).pipe(Effect.ignore);
+    return publicKey;
+  });
 
   const get: GitIdentityService["Service"]["get"] = (subject) => readProfile(subject);
 

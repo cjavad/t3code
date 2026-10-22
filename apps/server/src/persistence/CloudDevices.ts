@@ -131,24 +131,25 @@ export const make = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("CloudDeviceRepository.list:query")),
     );
 
-  const assign: CloudDeviceRepository["Service"]["assign"] = (input) =>
-    Effect.gen(function* () {
-      // A device has to have connected at least once before it can be given to
-      // someone; assigning an invented thumbprint would otherwise look like it
-      // worked and quietly do nothing.
-      const existing = yield* readRow({ proofKeyThumbprint: input.proofKeyThumbprint }).pipe(
-        Effect.mapError(toPersistenceSqlError("CloudDeviceRepository.assign:read")),
-      );
-      if (Option.isNone(existing)) return false;
-      yield* sql`
+  const assign: CloudDeviceRepository["Service"]["assign"] = Effect.fn(
+    "CloudDeviceRepository.assign",
+  )(function* (input) {
+    // A device has to have connected at least once before it can be given to
+    // someone; assigning an invented thumbprint would otherwise look like it
+    // worked and quietly do nothing.
+    const existing = yield* readRow({ proofKeyThumbprint: input.proofKeyThumbprint }).pipe(
+      Effect.mapError(toPersistenceSqlError("CloudDeviceRepository.assign:read")),
+    );
+    if (Option.isNone(existing)) return false;
+    yield* sql`
         UPDATE auth_cloud_devices
         SET subject = ${input.subject},
             assigned_by_subject = ${input.assignedBySubject},
             assigned_at = ${input.now}
         WHERE proof_key_thumbprint = ${input.proofKeyThumbprint}
       `.pipe(Effect.mapError(toPersistenceSqlError("CloudDeviceRepository.assign:update")));
-      return true;
-    });
+    return true;
+  });
 
   return CloudDeviceRepository.of({ recordSeen, subjectFor, list, assign });
 });

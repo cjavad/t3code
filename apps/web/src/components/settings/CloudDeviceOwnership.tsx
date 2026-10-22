@@ -1,6 +1,6 @@
 import type { AuthCloudDevice, EnvironmentId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { assignServerCloudDevice, fetchServerCloudDevices } from "../../environments/primary/auth";
 import { useEnvironmentQuery } from "../../state/query";
@@ -47,11 +47,13 @@ export function CloudDeviceOwnership({
       : sourceControlEnvironment.gitIdentityUsers({ environmentId, input: {} }),
   );
 
-  const load = useCallback(() => {
+  const load = () => {
+    void fetchServerCloudDevices().then(setDevices, () => setDevices([]));
+  };
+
+  useEffect(() => {
     void fetchServerCloudDevices().then(setDevices, () => setDevices([]));
   }, []);
-
-  useEffect(load, [load]);
 
   const assign = async (device: AuthCloudDevice, userId: string | null) => {
     setBusyThumbprint(device.proofKeyThumbprint);

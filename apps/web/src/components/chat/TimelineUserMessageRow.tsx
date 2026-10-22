@@ -6,7 +6,7 @@ import { Link } from "@tanstack/react-router";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
-import { memo, use, useMemo, useState, type ReactNode } from "react";
+import { memo, use, useState, type ReactNode } from "react";
 import {
   createMessageAttachmentPreviewProjector,
   selectMessageImageResources,
@@ -733,19 +733,13 @@ const UserMessageBody = memo(function UserMessageBody(props: {
 export function NoteTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const message = row.message;
-  const resources = useMemo(
-    () => selectMessageImageResources(message.attachments),
-    [message.attachments],
-  );
+  const resources = selectMessageImageResources(message.attachments);
   const previewUrls = useAssetUrls(ctx.activeThreadEnvironmentId, resources);
-  const urlsById = useMemo(() => {
-    const map = new Map<string, string>();
-    resources.forEach((resource, index) => {
-      const url = previewUrls[index];
-      if (url) map.set(resource.attachmentId, url);
-    });
-    return map;
-  }, [previewUrls, resources]);
+  const urlsById = new Map<string, string>();
+  resources.forEach((resource, index) => {
+    const url = previewUrls[index];
+    if (url) urlsById.set(resource.attachmentId, url);
+  });
   const images = (message.attachments ?? []).filter(isImageAttachment);
   const files = (message.attachments ?? []).filter(isFileAttachment);
   return (

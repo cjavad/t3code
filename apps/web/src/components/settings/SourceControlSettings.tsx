@@ -2,7 +2,7 @@ import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { ChevronDownIcon } from "lucide-react";
 import * as Duration from "effect/Duration";
 import * as Option from "effect/Option";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   BackgroundActivitySettings,
   EnvironmentId,
@@ -516,19 +516,14 @@ function GitIdentitySettings({ environmentId }: { readonly environmentId: Enviro
   const update = useAtomCommand(sourceControlEnvironment.updateGitIdentity, {
     reportFailure: false,
   });
-  const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
-  const [githubUsername, setGithubUsername] = useState("");
+  const [nameEdit, setDisplayName] = useState<string>();
+  const [emailEdit, setEmail] = useState<string>();
+  const [usernameEdit, setGithubUsername] = useState<string>();
   const [githubToken, setGithubToken] = useState("");
-  const [initialized, setInitialized] = useState(false);
   const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    if (initialized || identity.data === null) return;
-    setDisplayName(identity.data?.displayName ?? "");
-    setEmail(identity.data?.email ?? "");
-    setGithubUsername(identity.data?.githubUsername ?? "");
-    setInitialized(true);
-  }, [identity.data, initialized]);
+  const displayName = nameEdit ?? identity.data?.displayName ?? "";
+  const email = emailEdit ?? identity.data?.email ?? "";
+  const githubUsername = usernameEdit ?? identity.data?.githubUsername ?? "";
 
   const save = async () => {
     setSaving(true);

@@ -99,14 +99,13 @@ const make = Effect.gen(function* () {
       }
       yield* Ref.update(sessions, (current) => new Map(current).set(config.threadId, config));
     }),
-    read: (threadId) =>
-      Effect.gen(function* () {
-        const session = (yield* Ref.get(sessions)).get(threadId);
-        const environment = (yield* Ref.get(gitEnvironments)).get(threadId);
-        return session === undefined || environment === undefined
-          ? session
-          : { ...session, gitExecutionEnvironment: environment };
-      }),
+    read: Effect.fn("McpProviderSessions.read")(function* (threadId) {
+      const session = (yield* Ref.get(sessions)).get(threadId);
+      const environment = (yield* Ref.get(gitEnvironments)).get(threadId);
+      return session === undefined || environment === undefined
+        ? session
+        : { ...session, gitExecutionEnvironment: environment };
+    }),
 
     clear: (threadId) =>
       Ref.update(sessions, (current) => {
