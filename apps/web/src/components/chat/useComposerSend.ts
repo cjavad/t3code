@@ -474,7 +474,7 @@ export function useComposerSend(input: ComposerSendInput) {
       composerRef.current?.resetCursorState();
     }
     const sendCtx = composerRef.current?.getSendContext();
-    if (activePendingProgress && sendCtx?.answeringPendingUserInput !== false) {
+    if (!noteMode && activePendingProgress && sendCtx?.answeringPendingUserInput !== false) {
       if (directAnnotation) {
         notifyDirectAnnotationAttached();
         return;
@@ -482,11 +482,11 @@ export function useComposerSend(input: ComposerSendInput) {
       onAdvanceActivePendingUserInput();
       return;
     }
-    if (!sendCtx?.providerAvailable) {
+    if (!sendCtx || (!noteMode && !sendCtx.providerAvailable)) {
       notifyDirectAnnotationAttached();
       return;
     }
-    const multipleModelSelections = sendCtx.multipleModelSelections;
+    const multipleModelSelections = noteMode ? null : sendCtx.multipleModelSelections;
     const multipleModelBlock =
       multipleModelSelections === null
         ? null
@@ -602,7 +602,7 @@ export function useComposerSend(input: ComposerSendInput) {
       composerThreadContexts.length === 0
         ? parseCodexFeedbackCommand(trimmed)
         : null;
-    if (feedbackCommand && multipleModelSelections === null) {
+    if (!noteMode && feedbackCommand && multipleModelSelections === null) {
       if (!isServerThread || activeThread.activeProviderThreadId === null) {
         toastManager.add(
           stackedThreadToast({
@@ -652,6 +652,7 @@ export function useComposerSend(input: ComposerSendInput) {
       !directAnnotation &&
       sendInteractionModeEnabled &&
       showPlanFollowUpPrompt &&
+      !noteMode &&
       activeProposedPlan &&
       composerImages.length === 0 &&
       composerFiles.length === 0
@@ -728,7 +729,7 @@ export function useComposerSend(input: ComposerSendInput) {
       composerThreadContexts.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
-    if (standaloneSlashCommand && multipleModelSelections === null) {
+    if (!noteMode && standaloneSlashCommand && multipleModelSelections === null) {
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
@@ -800,7 +801,7 @@ export function useComposerSend(input: ComposerSendInput) {
       phase,
       dispatchMode,
     });
-    if (missingWorktreeBaseBranch) {
+    if (!noteMode && missingWorktreeBaseBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
     }
@@ -952,7 +953,7 @@ export function useComposerSend(input: ComposerSendInput) {
     // drafts leave them alone. After navigating away during an upload, the shown approvals
     // are another thread's, so this send leaves them alone too.
     const approvalsToDecline =
-      currentRouteThreadKeyRef.current === routeThreadKey
+      !noteMode && currentRouteThreadKeyRef.current === routeThreadKey
         ? pendingApprovalsRef.current.filter((approval) =>
             sendCtx?.shownPendingApprovalIds.includes(approval.requestId),
           )
@@ -1163,7 +1164,7 @@ export function useComposerSend(input: ComposerSendInput) {
       failure = turnAttachmentsResult;
     }
 
-    if (failure === null && compactBeforeSend) {
+    if (!noteMode && failure === null && compactBeforeSend) {
       const compactResult = await startThreadTurn({
         environmentId,
         input: {
@@ -1342,7 +1343,7 @@ export function useComposerSend(input: ComposerSendInput) {
         });
         const retryComposerImages = restoreComposerDraft(composerDraftTarget, sendSnapshot);
         if (currentRouteThreadKeyRef.current === routeThreadKey) {
-          promptRef.current = messageTextForSend;
+          promptRef.current = noteMode ? `/note ${messageTextForSend}` : messageTextForSend;
           composerImagesRef.current = retryComposerImages;
           composerFilesRef.current = composerFilesSnapshot;
           composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
