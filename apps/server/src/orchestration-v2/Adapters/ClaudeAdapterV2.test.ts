@@ -2380,6 +2380,57 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     });
   const makeWakeHarness = makeWakeHarnessWithOptions();
 
+  it.effect("passes thread Git identity and signing into the Claude process", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarnessWithOptions({
+        environment: { GIT_AUTHOR_NAME: "Javad", PATH: "/usr/bin" },
+      });
+      const sessions = yield* McpProviderSessions.McpProviderSessions;
+      const environment = {
+        T3_GIT_SUBJECT: "johan",
+        GIT_AUTHOR_NAME: "Johan",
+        GIT_AUTHOR_EMAIL: "johan@example.com",
+        GIT_COMMITTER_NAME: "Johan",
+        GIT_COMMITTER_EMAIL: "johan@example.com",
+        GIT_CONFIG_COUNT: "3",
+        GIT_CONFIG_KEY_0: "commit.gpgsign",
+        GIT_CONFIG_VALUE_0: "true",
+        GIT_CONFIG_KEY_1: "gpg.format",
+        GIT_CONFIG_VALUE_1: "ssh",
+        GIT_CONFIG_KEY_2: "user.signingKey",
+        GIT_CONFIG_VALUE_2: "/persistent/johan.key",
+        GH_TOKEN: "johan-test-token",
+      };
+      yield* sessions.set({
+        environmentId: EnvironmentId.make("environment:claude-git-identity"),
+        threadId: harness.threadId,
+        providerSessionId: "mcp:claude-git-identity",
+        providerInstanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+        endpoint: "http://127.0.0.1:3773/mcp",
+        authorizationHeader: "Bearer test-credential",
+        browserToolsAvailable: false,
+      });
+      yield* sessions.setGitExecutionEnvironment(harness.threadId, environment);
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("attempt-claude-git-identity"),
+          text: "Check git identity.",
+          attachments: [],
+        }),
+      );
+      assert.deepInclude(harness.getOpenedOptions()?.env, environment);
+      assert.equal(harness.getOpenedOptions()?.env?.PATH, "/usr/bin");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
   describe("Claude settings restrictions", () => {
     it.effect("resolves cached managed policy from the configured home through the real SDK", () =>
       Effect.gen(function* () {
