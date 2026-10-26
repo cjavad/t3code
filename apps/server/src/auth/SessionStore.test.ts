@@ -536,7 +536,11 @@ it.effect("cookie and WebSocket credentials follow a corrected persisted person 
       "SessionTokenRevokedError",
     );
   }).pipe(
-    Effect.provide(layerSessionStore().pipe(Layer.provideMerge(SqlitePersistence.layerMemory))),
-    Effect.provide(NodeServices.layer),
+    Effect.provide(
+      layerSessionStore().pipe(
+        Layer.provideMerge(SqlitePersistence.layerMemory),
+        Layer.provide(NodeServices.layer),
+      ),
+    ),
   ),
 );

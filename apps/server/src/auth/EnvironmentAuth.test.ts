@@ -351,7 +351,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         )
         .pipe(Effect.flip);
       expect(reused._tag).toBe("ServerAuthInvalidCredentialError");
-    }).pipe(Effect.provide(layerEnvironmentAuth()), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(layerEnvironmentAuth().pipe(Layer.provide(NodeServices.layer)))),
   );
 
   it.effect.each([
@@ -374,7 +374,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       );
 
       expect(token.scope).toBe("orchestration:read");
-    }).pipe(Effect.provide(layerEnvironmentAuth()), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(layerEnvironmentAuth().pipe(Layer.provide(NodeServices.layer)))),
   );
 
   it.effect("narrows seeded desktop grants to the requested scopes", () =>
@@ -483,7 +483,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
 
       expect(verified.scopes).toEqual(AuthStandardClientScopes);
       expect(verified.subject).toBe("administrative-bootstrap");
-    }).pipe(Effect.provide(layerEnvironmentAuth()), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(layerEnvironmentAuth().pipe(Layer.provide(NodeServices.layer)))),
   );
 
   it.effect(
@@ -773,5 +773,5 @@ it.effect("a pairing label stays a device label, and explicit ownership survives
           .label,
       ).toBe("javadbrowser2");
     }
-  }).pipe(Effect.provide(layerEnvironmentAuth()), Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(layerEnvironmentAuth().pipe(Layer.provide(NodeServices.layer)))),
 );

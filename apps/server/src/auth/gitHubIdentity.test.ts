@@ -33,8 +33,8 @@ it.effect("binds REST and GraphQL to each person and rereads rotated tokens with
     );
     const api = yield* GitHubRest.GitHubRest.pipe(
       Effect.provide(
-        Layer.mergeAll(GitHubRest.layer, GitHubGraphQlClient.layer).pipe(
-          Layer.provideMerge(GitHubApi.layer),
+        GitHubGraphQlClient.layer.pipe(
+          Layer.provideMerge(GitHubRest.layer),
           Layer.provideMerge(
             Layer.mergeAll(
               Layer.mock(GitHubCredentials.GitHubCredentials)({
@@ -120,8 +120,8 @@ it.effect("verifies the page account and writes PR actions under the personal cr
     );
     const cli = yield* GitHubPullRequestApi.make.pipe(
       Effect.provide(
-        Layer.mergeAll(GitHubRest.layer, GitHubGraphQlClient.layer).pipe(
-          Layer.provideMerge(GitHubApi.layer),
+        GitHubGraphQlClient.layer.pipe(
+          Layer.provideMerge(GitHubRest.layer),
           Layer.provideMerge(
             Layer.mergeAll(
               Layer.mock(GitHubCredentials.GitHubCredentials)({
