@@ -8,14 +8,16 @@ import * as SqlClient from "effect/sql/SqlClient";
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const tableName = "orchestration_v2_projection_messages";
-  const tables = yield* sql<{ columns_json: string }>`
-    SELECT columns_json FROM orchestration_storage_tables WHERE table_name = ${tableName}
+  const tables = yield* sql<{ columns_json: string; row_count: number; sha256: string }>`
+    SELECT columns_json, row_count, sha256 FROM orchestration_storage_tables WHERE table_name = ${tableName}
   `;
   if (tables[0]) {
     const columns: string[] = JSON.parse(tables[0].columns_json);
     const role = columns.indexOf("role");
     if (role < 0) throw new Error("Message baseline is missing its role column");
     const hash = NodeCrypto.createHash("sha256");
+    const originalHash = NodeCrypto.createHash("sha256");
+    let originalCount = 0;
     let count = 0;
     let cursor = 0;
     while (true) {
@@ -29,6 +31,12 @@ export default Effect.gen(function* () {
       const chunk = chunks[0];
       if (!chunk) break;
       const rows = decodeStorageChunk(chunk.payload, chunk.sha256, chunk.raw_bytes);
+      for (const row of rows) {
+        if (row.length !== columns.length) throw new Error("Invalid message baseline row width");
+        originalHash.update(JSON.stringify(row));
+        originalHash.update("\n");
+        originalCount++;
+      }
       const retained = rows.filter((row) => row[role] !== "note");
       for (const row of retained) {
         hash.update(JSON.stringify(row));
@@ -46,6 +54,8 @@ export default Effect.gen(function* () {
       cursor = chunk.chunk_id;
       yield* Effect.yieldNow;
     }
+    if (originalCount !== tables[0].row_count || originalHash.digest("hex") !== tables[0].sha256)
+      throw new Error("Message storage baseline failed verification");
     yield* sql`UPDATE orchestration_storage_tables SET row_count = ${count}, sha256 = ${hash.digest("hex")}
       WHERE table_name = ${tableName}`;
   }

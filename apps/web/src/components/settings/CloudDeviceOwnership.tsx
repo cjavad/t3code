@@ -22,16 +22,7 @@ const lastSeenLabel = (device: AuthCloudDevice) => {
   return seen.toLocaleDateString();
 };
 
-/**
- * Who each T3 Connect device speaks for.
- *
- * Every client behind the relay proves the same linked cloud account, so the
- * account cannot tell one person from another. The DPoP key a device holds
- * can, so that is what gets claimed here. An unclaimed device still connects
- * and drives agents; it just authors nothing and cannot give a thread a Git
- * identity, which is what keeps one person's signing key out of another's
- * commits.
- */
+// Per-device DPoP keys distinguish people sharing one linked cloud account.
 export function CloudDeviceOwnership({
   environmentId,
   rowClassName,
@@ -51,6 +42,7 @@ export function CloudDeviceOwnership({
     void fetchServerCloudDevices().then(setDevices, () => setDevices([]));
   };
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Fetch device ownership from the server when settings mount.
   useEffect(() => {
     void fetchServerCloudDevices().then(setDevices, () => setDevices([]));
   }, []);
@@ -84,7 +76,7 @@ export function CloudDeviceOwnership({
               </p>
               <p className="truncate text-xs text-muted-foreground/60">
                 {device.userId === null
-                  ? "Acts as nobody — cannot author messages or commit"
+                  ? "Acts as nobody. cannot author messages or commit"
                   : "Commits and messages are attributed to this user"}
                 {" · "}
                 {lastSeenLabel(device)}

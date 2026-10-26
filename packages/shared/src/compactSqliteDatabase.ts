@@ -349,11 +349,8 @@ export function compactSqliteDatabase(input: {
     target
       .prepare("UPDATE sqlite_sequence SET seq=? WHERE name='orchestration_events'")
       .run(highWater);
-    // SQLite evaluates virtual columns even while building unrelated scalar indexes.
-    // Expanding every historical JSON string in one native call retains gigabytes of V8
-    // handles until the call returns. All indexes on compressed tables use scalar columns;
-    // their keys are independent of this temporary value. The subsequent row verifier
-    // checks actual chunk payloads and coordinates through a fresh real reader.
+    // Scalar index creation otherwise retains expanded JSON in native V8 handles.
+    // Substitute empty payloads until indexing finishes; the fresh reader verifies real chunks.
     // Keep all three parameters: SQLite registers overloads by arity.
     target.function(
       "t3_read_payload",

@@ -1,29 +1,5 @@
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
-/**
- * PiAdapterV2 — orchestrator-v2 adapter for the Pi coding agent
- * (https://pi.dev), driving `pi --mode rpc` over stdio JSONL via `PiRpc.ts`.
- *
- * Design intent: honor the user's Pi customizations. The process is spawned
- * with no `--no-*` flags, so the user's extensions, skills, prompt templates,
- * AGENTS.md / SYSTEM.md context, settings.json, custom models, and auth all
- * load exactly as they do in the `pi` TUI. Sessions are stored by Pi itself
- * (default `~/.pi/agent/sessions/`), and the session file path is the durable
- * `nativeThreadRef`, so a thread started in T3 can be resumed from the TUI
- * and vice versa.
- *
- * Turn lifecycle: `agent_settled` is the only terminal signal. `agent_end`
- * merely closes one low-level run — compaction retries, auto-retries, and
- * queued continuations may still follow it, so the turn stays open until Pi
- * reports the session settled. An extension can start detached compaction as
- * that signal unwinds, so the adapter confirms Pi is idle before terminalizing.
- *
- * Extension UI: Pi extensions raise dialogs through `extension_ui_request`.
- * Dialog methods become v2 runtime requests (`confirm` → approval_request,
- * `select`/`input`/`editor` → user_input_request); answers travel back as
- * `extension_ui_response`. `notify` becomes a completed activity item.
- * Terminal-only decoration such as status, widget, title, and editor-text
- * updates has no matching T3 surface and is ignored.
- */
+// Pi loads user customizations; agent_settled closes a turn after any retries and compaction.
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";

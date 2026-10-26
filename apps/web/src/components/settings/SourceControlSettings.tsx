@@ -6,7 +6,6 @@ import { useState, type ReactNode } from "react";
 import type {
   BackgroundActivitySettings,
   EnvironmentId,
-  SourceControlProviderKind,
   SourceControlDiscoveryResult,
   SourceControlProviderAuth,
   SourceControlProviderDiscoveryItem,

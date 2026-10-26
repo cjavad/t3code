@@ -63,7 +63,7 @@ const RawAuthUserRecord = Schema.Struct({
 
 const decodeAuthUser = Schema.decodeUnknownEffect(AuthUserRecord);
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   const readBySubjectRow = SqlSchema.findOneOption({

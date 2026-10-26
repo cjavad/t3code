@@ -50,13 +50,22 @@ vi.mock("../../state/session", () => ({
   readEnvironmentScope: () => true,
   useEnvironmentsWithScope: () => new Set(mocks.targets.map((target) => target.environmentId)),
 }));
+vi.mock("../../state/sourceControl", () => ({
+  sourceControlEnvironment: { gitIdentity: () => ({}), updateGitIdentity: {} },
+}));
+vi.mock("../../state/query", () => ({
+  useEnvironmentQuery: () => ({ data: null, refresh: () => {} }),
+}));
 vi.mock("../../state/server", () => ({ serverEnvironment: { updateSettings: {} } }));
 vi.mock("../../state/use-atom-command", () => ({
   useAtomCommand: () => mocks.updateSettings,
 }));
 vi.mock("../threads/thread-settings-options", () => ({ RUNTIME_MODE_CHOICES: [] }));
 vi.mock("../../components/ui/ScreenScrollView", () => ({ ScreenScrollView: Children }));
-vi.mock("../../components/ui/AppText", () => ({ AppText: Children }));
+vi.mock("../../components/ui/AppText", () => ({
+  AppText: Children,
+  AppTextInput: () => <input />,
+}));
 vi.mock("../../components/ui/Button", () => ({
   Button: ({
     label,

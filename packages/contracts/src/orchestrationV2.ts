@@ -126,13 +126,7 @@ export const OrchestrationV2AppThreadLineage = Schema.Struct({
 });
 export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLineage.Type;
 
-/**
- * The user a thread's agents act as in Git. Persisted on the thread rather
- * than read from the connected session: a scheduled run, a resumed thread and
- * a colleague pressing "continue" must all commit as the person the thread
- * belongs to, and a provider process started with no identity at all must fail
- * loudly instead of falling back to a shared one.
- */
+/** Persisted owner so resumed and scheduled agents use the same Git identity. */
 export const OrchestrationV2ThreadGitIdentity = Schema.Struct({
   /** `auth_users.id` whose Git profile, signing key and GitHub token agents inherit. */
   userId: TrimmedNonEmptyString,
@@ -434,7 +428,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   /** Git identity this thread's agents commit as; absent on threads created
       before persistent identity, which claim one on their next user message. */
   gitIdentity: Schema.optional(Schema.NullOr(OrchestrationV2ThreadGitIdentity)),
-  /** Pull request the user linked to this thread (#8160); optional so
+  /** Pull request the user linked to this thread; optional so
       pre-linking servers still decode. */
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
@@ -1943,7 +1937,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   /** Git identity this thread's agents commit as. */
   gitIdentity: Schema.optional(Schema.NullOr(OrchestrationV2ThreadGitIdentity)),
-  /** Pull request the user linked to this thread (#8160). */
+  /** Pull request the user linked to this thread. */
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -2932,7 +2926,7 @@ export const OrchestrationV2Command = Schema.Union([
     /** Audit trail for the assignment. The transport overwrites whatever a
         client sends with the authenticated user, so it cannot be forged. */
     gitIdentityAssignedByUserId: Schema.optional(TrimmedNonEmptyString),
-    /** Link (object) or unlink (null) a pull request (#8160); absent leaves it unchanged. */
+    /** Link (object) or unlink (null) a pull request; absent leaves it unchanged. */
     linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   }),
   Schema.Struct({

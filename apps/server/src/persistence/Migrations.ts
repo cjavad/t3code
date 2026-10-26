@@ -211,16 +211,7 @@ export interface RunMigrationsOptions {
   readonly toMigrationInclusive?: number | undefined;
 }
 
-/**
- * Run all pending migrations.
- *
- * Creates the migrations tracking table (effect_sql_migrations) if it doesn't exist,
- * then runs any migrations with ID greater than the latest recorded migration.
- *
- * Returns array of [id, name] tuples for migrations that were run.
- *
- * @returns Effect containing array of executed migrations
- */
+/** Run missing migrations and return their IDs and names. */
 // Released fork builds recorded 63/64 before upstream introduced 57/58.
 // Migrator uses the highest id, so fill only this known gap transactionally.
 const reconcileForkMigrationGap = Effect.fn("reconcileForkMigrationGap")(function* (

@@ -53,7 +53,7 @@ const normalizeGitHubUsername = (username: string): string => username.trim().re
 
 const isValidGitHubUsername = (username: string): boolean => /^[A-Za-z0-9-]{1,39}$/u.test(username);
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;

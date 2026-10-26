@@ -3,13 +3,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import ProjectionThreadPullRequests from "./Migrations/050_ProjectionThreadPullRequests.ts";
 
-/**
- * Preview builds used migration ids 48–62 for V2 before the released build
- * moved the legacy projection migrations back into that range. The migrator
- * keys on ids, so those databases can have the V2 tables while silently
- * skipping the released projection columns and tables. Reconcile the small,
- * additive schema pieces by shape before the normal id-based migrator runs.
- */
+// Preview migration IDs overlapped released IDs; reconcile additive schema pieces by shape.
 export const reconcileRenumberedProjectionMigrations = Effect.fn(
   "reconcileRenumberedProjectionMigrations",
 )(function* () {

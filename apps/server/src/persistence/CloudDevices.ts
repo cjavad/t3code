@@ -8,14 +8,7 @@ import * as SqlSchema from "effect/sql/SqlSchema";
 
 import { PersistenceSqlError, toPersistenceSqlError } from "./Errors.ts";
 
-/**
- * Devices that reach this environment through T3 Connect.
- *
- * Every client behind the relay authenticates against the one cloud account
- * the environment is linked to, so the cloud account cannot say *who* is
- * typing. The DPoP proof key each device holds can: it is per-device and
- * durable, so it is what a person is mapped to here.
- */
+/** Map durable per-device DPoP keys to people sharing one cloud account. */
 export const CloudDeviceRecord = Schema.Struct({
   proofKeyThumbprint: Schema.String,
   /** Local auth subject the device acts as; null until somebody assigns it. */
@@ -68,7 +61,7 @@ export class CloudDeviceRepository extends Context.Service<
 
 const decodeCloudDevice = Schema.decodeUnknownEffect(CloudDeviceRecord);
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   const readRow = SqlSchema.findOneOption({

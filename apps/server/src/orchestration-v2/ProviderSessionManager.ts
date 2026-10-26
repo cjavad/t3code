@@ -314,13 +314,7 @@ export const layerWithOptions = (
       /** Unreadable settings must preserve explicit browser-access opt-outs. */
       const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
       const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
-      /**
-       * Optional for the same reason as the settings above: focused tests
-       * assemble this layer by hand and never spawn a real process. Production
-       * always provides it, and without it a provider process simply inherits
-       * no Git identity, which makes its commits fail loudly rather than land
-       * under the wrong name.
-       */
+      // Focused tests omit identity services; production provides them before spawning agents.
       const threadGitEnvironment = yield* Effect.serviceOption(ThreadGitEnvironment);
       const eventSink = yield* EventSink.EventSinkV2;
       const commandOutput = yield* CommandOutputHub.CommandOutputHub;
@@ -2117,13 +2111,7 @@ export const layerWithOptions = (
                 return existing.exposedRuntime;
               }
 
-              // Spawning is the moment a thread's Git identity is fixed for the
-              // life of the process, so it is resolved here — from the thread,
-              // not from whoever is connected — and before the MCP session is
-              // prepared, since that bakes the environment into the process. A
-              // reused live session above is deliberately left alone: its
-              // environment cannot be rewritten, which is why reassigning an
-              // identity detaches the session instead.
+              // Resolve persisted identity before preparing MCP and spawning the process. Reassignment detaches live sessions.
               yield* applyThreadGitIdentity(input.threadId);
               const adapter = yield* registry.get(input.modelSelection.instanceId).pipe(
                 Effect.mapError(

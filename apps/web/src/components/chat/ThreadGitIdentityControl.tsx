@@ -36,15 +36,7 @@ function GitHubAvatar(props: { readonly username: string; readonly className: st
   );
 }
 
-/**
- * Which user this thread's agents commit as.
- *
- * The thread claims an identity from its first user message and keeps it, so a
- * colleague continuing someone else's thread does not silently take over its
- * commits. Reassigning ends the current provider session: a running agent
- * process keeps the environment it was started with, and pretending otherwise
- * would show an identity the next commit would not use.
- */
+// Reassignment ends the provider session because running processes retain their original Git environment.
 export function ThreadGitIdentityControl(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
@@ -141,7 +133,7 @@ export function ThreadGitIdentityControl(props: {
                   )}
                   <span className="min-w-0 truncate">
                     {candidate.displayName}
-                    {candidate.identityConfigured ? "" : " — no Git identity"}
+                    {candidate.identityConfigured ? "" : ". no Git identity"}
                   </span>
                 </span>
               </MenuItem>

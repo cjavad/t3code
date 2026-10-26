@@ -13,7 +13,7 @@ import * as EventStore from "./EventStore.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 
 /** Online callers keep short transactions; offline maintenance can scan larger pages. */
-export const CompactionPageSize = Context.Reference<number>(
+const CompactionPageSize = Context.Reference<number>(
   "t3/ProjectionMaintenance/CompactionPageSize",
   {
     defaultValue: () => 50,

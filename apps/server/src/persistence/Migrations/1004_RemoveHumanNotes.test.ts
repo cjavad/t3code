@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- Exercises the persisted chunk encoding and digest.
-import * as Crypto from "node:crypto";
-import * as Zlib from "node:zlib";
+import * as NodeCrypto from "node:crypto";
+import * as NodeZlib from "node:zlib";
 import { assert, it } from "@effect/vitest";
 import { decodeStorageChunk } from "@t3tools/shared/compressedSqlite";
 import { STORAGE_SCHEMA } from "@t3tools/shared/sqliteStorageSchema";
@@ -24,9 +24,12 @@ it.effect(
         ["n", "note", '{"text":"remove"}'],
       ];
       const raw = Buffer.from(JSON.stringify(rows));
-      const digest = Crypto.createHash("sha256").update(raw).digest("hex");
-      yield* sql`INSERT INTO orchestration_storage_tables VALUES ('orchestration_v2_projection_messages','["message_id","role","payload_json"]','schema',2,'before')`;
-      yield* sql`INSERT INTO orchestration_storage_chunks VALUES (1,'orchestration_v2_projection_messages',2,${raw.length},${digest},${Zlib.zstdCompressSync(raw)})`;
+      const digest = NodeCrypto.createHash("sha256").update(raw).digest("hex");
+      const tableDigest = NodeCrypto.createHash("sha256")
+        .update(rows.map((row) => JSON.stringify(row) + "\n").join(""))
+        .digest("hex");
+      yield* sql`INSERT INTO orchestration_storage_tables VALUES ('orchestration_v2_projection_messages','["message_id","role","payload_json"]','schema',2,${tableDigest})`;
+      yield* sql`INSERT INTO orchestration_storage_chunks VALUES (1,'orchestration_v2_projection_messages',2,${raw.length},${digest},${NodeZlib.zstdCompressSync(raw)})`;
       yield* RemoveHumanNotes;
       assert.deepStrictEqual(
         yield* sql`SELECT message_id FROM orchestration_v2_projection_messages`,
@@ -54,7 +57,7 @@ it.effect(
       assert.equal(tables[0]!.row_count, 1);
       assert.equal(
         tables[0]!.sha256,
-        Crypto.createHash("sha256")
+        NodeCrypto.createHash("sha256")
           .update(JSON.stringify(rows[0]) + "\n")
           .digest("hex"),
       );

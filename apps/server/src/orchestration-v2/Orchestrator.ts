@@ -5168,12 +5168,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
       projection = yield* getProjectionWithPendingEvents(command.threadId, events);
     }
-    // The first genuine user message claims the thread for its sender, and
-    // every later run commits as that person no matter who continues the
-    // thread. Creation deliberately claims nothing, so forks, imports and
-    // scheduled shells stay unassigned until somebody actually speaks in
-    // them. Commands are decided serially per thread, so two racing first
-    // messages cannot both claim.
+    // First user message claims identity; serialized commands prevent racing claims.
     if (
       projection.thread.gitIdentity == null &&
       command.createdBy === "user" &&

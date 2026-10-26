@@ -1251,11 +1251,7 @@ export const layerWsRpc = (
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const authUsers = yield* AuthUsers.AuthUserRepository;
-      // A T3 Connect device nobody has claimed authenticates as the shared
-      // connect subject, which stands for a machine rather than a person. It
-      // gets no user row and its messages carry no author, so a thread cannot
-      // end up claiming "whichever laptop spoke first" as the identity its
-      // agents commit under.
+      // Unclaimed cloud devices get no human user or Git identity until ownership is assigned.
       const currentUser =
         !AuthUsers.isHumanAuthSubject(currentSession.subject) ||
         currentSession.subject === AuthCloudConnectUnassignedSubject

@@ -10,7 +10,7 @@ import * as Redacted from "effect/Redacted";
 import { AuthUserRepository } from "../persistence/AuthUsers.ts";
 import { GitIdentityService } from "./GitIdentityService.ts";
 
-export const credentialForToken = (token: Redacted.Redacted<string>) => ({
+const credentialForToken = (token: Redacted.Redacted<string>) => ({
   host: "github.com",
   token,
   credentialFingerprint: `github.com:${NodeCrypto.createHash("sha256").update(Redacted.value(token), "utf8").digest("hex")}`,
@@ -34,11 +34,7 @@ export const withSubject = Effect.fn("GitHubIdentity.withSubject")(function* <A,
 });
 
 /** Background readers follow the persisted thread owner, not the triggering session. */
-export const withThreadIdentity = Effect.fn("GitHubIdentity.withThreadIdentity")(function* <
-  A,
-  E,
-  R,
->(
+const withThreadIdentity = Effect.fn("GitHubIdentity.withThreadIdentity")(function* <A, E, R>(
   identity: OrchestrationV2ThreadGitIdentity | null | undefined,
   operation: Effect.Effect<A, E, R>,
 ) {

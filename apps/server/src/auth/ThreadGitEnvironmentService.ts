@@ -14,20 +14,7 @@ import { AuthUserRepository } from "../persistence/AuthUsers.ts";
 import { makeGitExecutionEnvironment } from "./GitExecutionEnvironment.ts";
 import * as GitIdentityService from "./GitIdentityService.ts";
 
-/**
- * Turns the identity a thread carries into the environment its agent processes
- * inherit.
- *
- * Resolution deliberately starts from persisted thread state rather than the
- * connected session: a run started by the scheduler, a resumed thread after a
- * server restart, and a colleague pressing "continue" must all produce commits
- * authored by the person the thread belongs to.
- *
- * A thread with no identity gets an environment with *empty* author and
- * committer variables. That is the point: Git then refuses the commit instead
- * of quietly falling back to whatever global identity the server happens to
- * have configured.
- */
+/** Resolve persisted thread identity; empty author variables make unassigned Git commits fail. */
 export interface ThreadGitEnvironmentShape {
   /** Environment for a subject acting on its own behalf (interactive Git actions). */
   readonly forSubject: (subject: string) => Effect.Effect<Record<string, string>>;
@@ -50,7 +37,7 @@ export class ThreadGitEnvironment extends Context.Service<
 const subjectKey = (subject: string): string =>
   NodeCrypto.createHash("sha256").update(subject, "utf8").digest("hex").slice(0, 40);
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
   const config = yield* ServerConfig.ServerConfig;
   const gitIdentity = yield* GitIdentityService.GitIdentityService;

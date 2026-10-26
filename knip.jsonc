@@ -43,6 +43,7 @@
         "src/bin.ts!",
         "src/claude-history-worker.ts!",
         "scripts/cli.ts",
+        "scripts/compact-db.ts",
         "scripts/evaluate-thread-titles.ts",
         "scripts/fetch-expo-schema.ts",
         "scripts/probe-claude-fork-local-rollback-replay.ts",

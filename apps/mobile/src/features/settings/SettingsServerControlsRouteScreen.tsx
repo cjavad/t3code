@@ -4,7 +4,6 @@ import { AuthSettingsWriteScope } from "@t3tools/contracts";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
-import { SymbolView } from "../../components/ui/AppSymbol";
 import {
   type ResponseStreamingMode,
   type EnvironmentId,
@@ -15,12 +14,11 @@ import {
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectScopedServerSettingKey,
 } from "@t3tools/contracts";
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { useRef, useState } from "react";
 import { Alert, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RUNTIME_MODE_CHOICES } from "../threads/thread-settings-options";
-import { serverEnvironment } from "../../state/server";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -515,18 +513,15 @@ function MobileGitIdentitySettings({ environmentId }: { readonly environmentId: 
     label: "git identity update",
     reportFailure: true,
   });
-  const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
-  const [githubUsername, setGithubUsername] = useState("");
+  const profile = identity.data;
+  const [displayNameOverride, setDisplayName] = useState<string | null>(null);
+  const displayName = displayNameOverride ?? identity.data?.displayName ?? "";
+  const [emailOverride, setEmail] = useState<string | null>(null);
+  const email = emailOverride ?? identity.data?.email ?? "";
+  const [githubUsernameOverride, setGithubUsername] = useState<string | null>(null);
+  const githubUsername = githubUsernameOverride ?? identity.data?.githubUsername ?? "";
   const [githubToken, setGithubToken] = useState("");
   const [saving, setSaving] = useState(false);
-  const profile = identity.data;
-  useEffect(() => {
-    if (profile === null) return;
-    setDisplayName((current) => current || profile.displayName);
-    setEmail((current) => current || profile.email);
-    setGithubUsername((current) => current || profile.githubUsername);
-  }, [profile]);
   const save = async () => {
     setSaving(true);
     const result = await update({
