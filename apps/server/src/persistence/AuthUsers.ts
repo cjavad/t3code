@@ -125,15 +125,13 @@ export const make = Effect.gen(function* () {
     `.pipe(
           Effect.mapError(toPersistenceSqlError("AuthUserRepository.ensureForSubject:insert")),
           Effect.andThen(readBySubject(input.subject)),
-          Effect.flatMap((user) =>
-            user === null
-              ? Effect.fail(
-                  new PersistenceSqlError({
-                    operation: "AuthUserRepository.ensureForSubject:readback",
-                    detail: "The auth user row was not created.",
-                  }),
-                )
-              : Effect.succeed(user),
+          Effect.filterOrFail(
+            (user) => user !== null,
+            () =>
+              new PersistenceSqlError({
+                operation: "AuthUserRepository.ensureForSubject:readback",
+                detail: "The auth user row was not created.",
+              }),
           ),
         );
 

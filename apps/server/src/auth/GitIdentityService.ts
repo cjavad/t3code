@@ -81,28 +81,30 @@ export const make = Effect.gen(function* () {
       ),
     );
     if (Option.isNone(stored)) return null;
-    try {
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
-      const parsed = JSON.parse(new TextDecoder().decode(stored.value)) as StoredProfile;
-      if (
-        typeof parsed.displayName !== "string" ||
-        typeof parsed.email !== "string" ||
-        typeof parsed.githubUsername !== "string" ||
-        typeof parsed.signingKey !== "string" ||
-        typeof parsed.githubTokenConfigured !== "boolean"
-      ) {
-        return yield* new GitIdentityError({
+    const parsed = yield* Effect.try({
+      // @effect-diagnostics-next-line preferSchemaOverJson:off -- Decodes the existing profile format; fields are checked below.
+      try: () => JSON.parse(new TextDecoder().decode(stored.value)) as StoredProfile,
+      catch: () =>
+        new GitIdentityError({
           reason: "storage",
-          detail: "The stored Git identity profile is invalid.",
-        });
-      }
-      return parsed;
-    } catch {
+          detail: "The stored Git identity profile could not be decoded.",
+        }),
+    });
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      typeof parsed.displayName !== "string" ||
+      typeof parsed.email !== "string" ||
+      typeof parsed.githubUsername !== "string" ||
+      typeof parsed.signingKey !== "string" ||
+      typeof parsed.githubTokenConfigured !== "boolean"
+    ) {
       return yield* new GitIdentityError({
         reason: "storage",
-        detail: "The stored Git identity profile could not be decoded.",
+        detail: "The stored Git identity profile is invalid.",
       });
     }
+    return parsed;
   });
 
   const persistProfile = (subject: string, profile: GitIdentityProfile) =>

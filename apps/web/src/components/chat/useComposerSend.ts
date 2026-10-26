@@ -28,7 +28,10 @@ import {
 } from "@t3tools/contracts";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import { wasBootstrapThreadDeleted } from "@t3tools/client-runtime/errors";
-import { declinePendingApprovals } from "@t3tools/client-runtime/state/thread-requests";
+import {
+  declinePendingApprovals,
+  sendApprovalFeedback,
+} from "@t3tools/client-runtime/state/thread-requests";
 import {
   parseCodexFeedbackCommand,
   submitCodexFeedback,
@@ -461,27 +464,8 @@ export function useComposerSend(input: ComposerSendInput) {
       });
       return;
     }
-    const noteMatch = /^\/note(?:\s+|$)/u.exec(promptRef.current.trimStart());
-    const noteMode = noteMatch !== null;
-    if (noteMode) {
-      if (!isServerThread) {
-        toastManager.add({ type: "warning", title: "Send a first message before leaving a note." });
-        return;
-      }
-      if (queuedRunEdit.isEditing) {
-        toastManager.add({
-          type: "warning",
-          title: "Finish editing the queued message before leaving a note.",
-        });
-        return;
-      }
-    }
-    const promptForSubmission =
-      noteMatch === null
-        ? promptRef.current
-        : promptRef.current.trimStart().slice(noteMatch[0].length);
     const sendCtx = composerRef.current?.getSendContext();
-    if (!noteMode && activePendingProgress && sendCtx?.answeringPendingUserInput !== false) {
+    if (activePendingProgress && sendCtx?.answeringPendingUserInput !== false) {
       if (directAnnotation) {
         notifyDirectAnnotationAttached();
         return;
@@ -489,11 +473,15 @@ export function useComposerSend(input: ComposerSendInput) {
       onAdvanceActivePendingUserInput();
       return;
     }
-    if (!sendCtx || (!noteMode && !sendCtx.providerAvailable)) {
+    if (!sendCtx?.providerAvailable) {
       notifyDirectAnnotationAttached();
       return;
     }
-    const multipleModelSelections = noteMode ? null : sendCtx.multipleModelSelections;
+    const multipleModelSelections = sendCtx.multipleModelSelections;
+    const approvalFeedbackTarget = pendingApprovalsRef.current.find(
+      (approval) =>
+        approval.supportsFeedback && approval.requestId === sendCtx.shownPendingApprovalIds[0],
+    );
     const multipleModelBlock =
       multipleModelSelections === null
         ? null
@@ -546,10 +534,10 @@ export function useComposerSend(input: ComposerSendInput) {
     // A direct "send annotation" writes the draft and sends in the same tick; the reference
     // must be in the text now, not after the next render.
     const promptForSend = directAnnotation
-      ? ensureInlineContextReferences(promptForSubmission, [
+      ? ensureInlineContextReferences(promptRef.current, [
           previewAnnotationContextReference(directAnnotation.annotation),
         ])
-      : promptForSubmission;
+      : promptRef.current;
     const strandedThread = threadContextsOutsideEnvironment({
       text: promptForSend,
       records: composerThreadContexts,
@@ -609,7 +597,7 @@ export function useComposerSend(input: ComposerSendInput) {
       composerThreadContexts.length === 0
         ? parseCodexFeedbackCommand(trimmed)
         : null;
-    if (!noteMode && feedbackCommand && multipleModelSelections === null) {
+    if (feedbackCommand && multipleModelSelections === null) {
       if (!isServerThread || activeThread.activeProviderThreadId === null) {
         toastManager.add(
           stackedThreadToast({
@@ -659,7 +647,6 @@ export function useComposerSend(input: ComposerSendInput) {
       !directAnnotation &&
       sendInteractionModeEnabled &&
       showPlanFollowUpPrompt &&
-      !noteMode &&
       activeProposedPlan &&
       composerImages.length === 0 &&
       composerFiles.length === 0
@@ -736,7 +723,7 @@ export function useComposerSend(input: ComposerSendInput) {
       composerThreadContexts.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
-    if (!noteMode && standaloneSlashCommand && multipleModelSelections === null) {
+    if (standaloneSlashCommand && multipleModelSelections === null) {
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
@@ -808,7 +795,7 @@ export function useComposerSend(input: ComposerSendInput) {
       phase,
       dispatchMode,
     });
-    if (!noteMode && missingWorktreeBaseBranch) {
+    if (missingWorktreeBaseBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
     }
@@ -838,7 +825,7 @@ export function useComposerSend(input: ComposerSendInput) {
       effort: ctxSelectedPromptEffort,
       text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
     });
-    if (!noteMode && composerRef.current?.validateProviderInput(outgoingMessageText) === false) {
+    if (composerRef.current?.validateProviderInput(outgoingMessageText) === false) {
       return;
     }
 
@@ -960,12 +947,12 @@ export function useComposerSend(input: ComposerSendInput) {
     // drafts leave them alone. After navigating away during an upload, the shown approvals
     // are another thread's, so this send leaves them alone too.
     const approvalsToDecline =
-      !noteMode && currentRouteThreadKeyRef.current === routeThreadKey
+      currentRouteThreadKeyRef.current === routeThreadKey
         ? pendingApprovalsRef.current.filter((approval) =>
             sendCtx?.shownPendingApprovalIds.includes(approval.requestId),
           )
         : [];
-    if (approvalsToDecline.length > 0) {
+    if (approvalsToDecline.length > 0 || approvalFeedbackTarget !== undefined) {
       // A draft edited since send, or a paste still landing in it, is no longer the message
       // the user sent.
       const attachmentIdsAtSend = composerAttachmentsSnapshot.map((attachment) => attachment.id);
@@ -1001,6 +988,42 @@ export function useComposerSend(input: ComposerSendInput) {
       const approvalResponding = approvalsToDecline.some((approval) =>
         respondingRequestIdsRef.current.includes(approval.requestId),
       );
+      if (approvalFeedbackTarget !== undefined) {
+        if (composerAttachmentsSnapshot.length > 0 || outgoingMessageContext !== undefined) {
+          setThreadError(
+            threadIdForSend,
+            "Send approval feedback without attachments or added context.",
+          );
+          sendInFlightRef.current = false;
+          return;
+        }
+        if (
+          changedBeforeDecline ||
+          approvalResponding ||
+          currentRouteThreadKeyRef.current !== routeThreadKey
+        ) {
+          sendInFlightRef.current = false;
+          return;
+        }
+        const sent = await sendApprovalFeedback(
+          approvalFeedbackTarget,
+          messageTextForSend,
+          onRespondToApprovalStable,
+        ).catch(() => false);
+        sendInFlightRef.current = false;
+        if (
+          sent &&
+          !draftChangedSinceSend() &&
+          currentRouteThreadKeyRef.current === routeThreadKey &&
+          useComposerDraftStore.getState().getComposerDraft(composerDraftTarget) ===
+            draftBeforeDecline
+        ) {
+          promptRef.current = "";
+          clearComposerDraftContent(composerDraftTarget);
+          composerRef.current?.resetCursorState();
+        }
+        return;
+      }
       const declined =
         !changedBeforeDecline &&
         !approvalResponding &&
@@ -1093,17 +1116,17 @@ export function useComposerSend(input: ComposerSendInput) {
       ...existing,
       {
         id: messageIdForSend,
-        role: noteMode ? "note" : "user",
-        text: noteMode ? messageTextForSend : outgoingMessageText,
+        role: "user",
+        text: outgoingMessageText,
         ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
         ...(outgoingMessageContext !== undefined ? { context: outgoingMessageContext } : {}),
         runId: null,
         createdAt: messageCreatedAt,
         updatedAt: messageCreatedAt,
         streaming: false,
-        ...(!noteMode && shouldQueueBehindActiveRun
+        ...(shouldQueueBehindActiveRun
           ? { inputIntent: "queued_turn" as const }
-          : !noteMode && phase === "running" && dispatchMode === "steer"
+          : phase === "running" && dispatchMode === "steer"
             ? { inputIntent: "steer" as const }
             : {}),
       },
@@ -1171,12 +1194,18 @@ export function useComposerSend(input: ComposerSendInput) {
       failure = turnAttachmentsResult;
     }
 
-    if (!noteMode && failure === null && compactBeforeSend) {
+    if (failure === null && compactBeforeSend) {
       const compactResult = await startThreadTurn({
         environmentId,
         input: {
           threadId: threadIdForSend,
-          message: { messageId: newMessageId(), role: "user", text: "/compact", attachments: [] },
+          message: {
+            messageId: newMessageId(),
+            role: "user",
+            text: "/compact",
+            attachments: [],
+            idleCompaction: "onReturn",
+          },
           modelSelection: ctxSelectedModelSelection,
           runtimeMode,
           interactionMode: sendInteractionMode,
@@ -1233,7 +1262,7 @@ export function useComposerSend(input: ComposerSendInput) {
             role: "user",
             attachments: turnAttachmentsResult.value,
             ...withMessageContext({
-              text: noteMode ? messageTextForSend : outgoingMessageText,
+              text: outgoingMessageText,
               context: buildOutgoingMessageContext(
                 boundAttachmentIds(turnAttachmentsResult.value, composerAttachmentsSnapshot),
               ),
@@ -1245,12 +1274,11 @@ export function useComposerSend(input: ComposerSendInput) {
             }),
           },
           modelSelection: ctxSelectedModelSelection,
-          ...(noteMode ? { mode: "note" as const } : { titleSeed: title }),
+          titleSeed: title,
           runtimeMode,
           interactionMode: sendInteractionMode,
-          ...(!noteMode
-            ? { dispatchMode: turnDispatchMode, ...(bootstrap ? { bootstrap } : {}) }
-            : {}),
+          dispatchMode: turnDispatchMode,
+          ...(bootstrap ? { bootstrap } : {}),
           createdAt: messageCreatedAt,
         },
       });
@@ -1348,19 +1376,15 @@ export function useComposerSend(input: ComposerSendInput) {
           const next = existing.filter((message) => message.id !== messageIdForSend);
           return next.length === existing.length ? existing : next;
         });
-        const retryPrompt = noteMode ? `/note ${messageTextForSend}` : messageTextForSend;
-        const retryComposerImages = restoreComposerDraft(composerDraftTarget, {
-          ...sendSnapshot,
-          messageText: retryPrompt,
-        });
+        const retryComposerImages = restoreComposerDraft(composerDraftTarget, sendSnapshot);
         if (currentRouteThreadKeyRef.current === routeThreadKey) {
-          promptRef.current = retryPrompt;
+          promptRef.current = messageTextForSend;
           composerImagesRef.current = retryComposerImages;
           composerFilesRef.current = composerFilesSnapshot;
           composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
           composerRef.current?.resetCursorState({
-            cursor: collapseExpandedComposerCursor(retryPrompt, retryPrompt.length),
-            prompt: retryPrompt,
+            cursor: collapseExpandedComposerCursor(messageTextForSend, messageTextForSend.length),
+            prompt: messageTextForSend,
             detectTrigger: true,
           });
         }

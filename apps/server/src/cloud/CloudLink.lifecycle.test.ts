@@ -129,7 +129,7 @@ describe("reconcileDesiredCloudLink", () => {
             Layer.mergeAll(
               Layer.mock(CloudDevices.CloudDeviceRepository)({}),
               Layer.mock(ConnectReachability.ConnectReachability)({
-                latest: Effect.succeed(Option.none()),
+                latest: Effect.succeedNone,
               }),
             ),
           ),
@@ -252,7 +252,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
               Layer.mergeAll(
                 Layer.mock(CloudDevices.CloudDeviceRepository)({}),
                 Layer.mock(ConnectReachability.ConnectReachability)({
-                  latest: Effect.succeed(Option.none()),
+                  latest: Effect.succeedNone,
                 }),
               ),
             ),
@@ -1015,8 +1015,6 @@ describe("releaseManagedTunnelOnShutdown", () => {
     );
   });
 
-  // A proof signed with a skewed boot clock is rejected as expired. The next
-  // attempt mints a new proof, so startup reconcile must keep retrying it.
   it.effect("retries a relay link proof rejected as expired", () => {
     const { store } = makeMemorySecretStore([
       [CLOUD_ENDPOINT_RUNTIME_CONFIG, "old-config"],

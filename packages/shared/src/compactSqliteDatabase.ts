@@ -1,3 +1,4 @@
+import { indexedMessageConditionSql, indexedMessageTextSql } from "./messageSearchSql.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off -- Synchronous offline SQLite exporter; hashes and timestamps form the persisted format.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -116,7 +117,24 @@ export function compactSqliteDatabase(input: {
         "SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'orchestration_storage_%' ORDER BY type='table' DESC, name",
       )
       .all();
-    const definitions = schemas.filter((row) => row.type === "table");
+    const tableTypes = new Map(
+      source
+        .prepare("PRAGMA table_list")
+        .all()
+        .map((row) => [String(row.name), String(row.type)]),
+    );
+    const searchTable = schemas.find((row) => row.name === "orchestration_v2_message_search");
+    const definitions = schemas.filter((row) => {
+      if (row.type !== "table") return false;
+      const kind = tableTypes.get(String(row.name));
+      if (kind === "shadow") return false;
+      if (kind === "virtual") {
+        if (row.name !== "orchestration_v2_message_search")
+          throw new Error(`Unsupported virtual table: ${row.name}`);
+        return false;
+      }
+      return true;
+    });
     const columnsByTable = new Map<string, string[]>();
     for (const row of definitions) {
       const name = String(row.name);
@@ -342,6 +360,7 @@ export function compactSqliteDatabase(input: {
       { deterministic: true },
       (_chunkId, _rowIndex, _columnIndex) => "{}",
     );
+    if (searchTable) target.exec(String(searchTable.sql));
     for (const row of schemas)
       if (row.type !== "table") {
         checkDeadline();
@@ -360,6 +379,26 @@ export function compactSqliteDatabase(input: {
         });
         target.exec(String(row.sql));
       }
+    registerCompressedSqlite(target);
+    if (searchTable) {
+      let cursor = 0;
+      const page = target.prepare(
+        "SELECT rowid FROM orchestration_v2_projection_messages WHERE rowid > ? ORDER BY rowid LIMIT 100",
+      );
+      const indexPage = target.prepare(`INSERT INTO orchestration_v2_message_search(rowid, text)
+        SELECT messages.rowid, ${indexedMessageTextSql("messages.payload_json")}
+        FROM orchestration_v2_projection_messages AS messages
+        WHERE messages.rowid > ? AND messages.rowid <= ? AND ${indexedMessageConditionSql()}
+          AND json_extract(messages.payload_json, '$.text') IS NOT NULL`);
+      while (true) {
+        checkDeadline();
+        const rows = page.all(cursor);
+        if (rows.length === 0) break;
+        const end = Number(rows[rows.length - 1]!.rowid);
+        indexPage.run(cursor, end);
+        cursor = end;
+      }
+    }
     checkDeadline();
     target.exec("COMMIT; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL");
     input.onProgress?.({

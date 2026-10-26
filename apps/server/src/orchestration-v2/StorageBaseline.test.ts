@@ -6,6 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
   EventId,
+  MessageId,
   ThreadId,
   ProjectId,
   ProviderInstanceId,
@@ -103,6 +104,26 @@ it.effect(
                 payload: thread,
               },
               {
+                id: EventId.make("storage:message"),
+                type: "message.updated",
+                threadId,
+                occurredAt: now,
+                payload: {
+                  id: MessageId.make("message:search"),
+                  threadId,
+                  runId: null,
+                  nodeId: null,
+                  createdBy: "user",
+                  creationSource: "web",
+                  role: "user",
+                  text: "searchable reconciliation message",
+                  attachments: [],
+                  streaming: false,
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              },
+              {
                 id: EventId.make("storage:item"),
                 type: "turn-item.updated",
                 threadId,
@@ -120,7 +141,7 @@ it.effect(
           });
         }).pipe(Effect.provide(databaseLayer(source)));
         const report = compactSqliteDatabase({ source, destination: compacted });
-        expect(report.removedEventCount).toBe(2);
+        expect(report.removedEventCount).toBe(3);
         expect(report.trimmedOutputCount).toBe(1);
         yield* Effect.gen(function* () {
           const sink = yield* Sink.EventSinkV2;
@@ -128,6 +149,10 @@ it.effect(
           const projections = yield* Projections.ProjectionStoreV2;
           const maintenance = yield* Maintenance.ProjectionMaintenanceV2;
           expect((yield* maintenance.verify).valid).toBe(true);
+          const searchSql = yield* SqlClient.SqlClient;
+          expect(
+            yield* searchSql`SELECT rowid FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH 'reconciliation'`,
+          ).toHaveLength(1);
           expect((yield* projections.getThreadProjection(threadId)).thread.title).toBe("compacted");
           expect(yield* events.latestSequence()).toBe(report.agentSequence);
           expect((yield* projections.getThreadProjection(threadId)).turnItems[0]).toHaveProperty(
@@ -146,6 +171,10 @@ it.effect(
             ],
           });
           expect((yield* maintenance.rebuild).valid).toBe(true);
+          const searchSqlAfter = yield* SqlClient.SqlClient;
+          expect(
+            yield* searchSqlAfter`SELECT rowid FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH 'reconciliation'`,
+          ).toHaveLength(1);
           expect(
             (yield* projections.getThreadProjection(threadId)).thread.pullRequests?.[0],
           ).toMatchObject({ number: 42, host: "github.com" });
@@ -165,6 +194,10 @@ it.effect(
           });
           expect(appended[0]!.sequence).toBeGreaterThan(report.applicationSequence);
           expect((yield* maintenance.rebuild).valid).toBe(true);
+
+          expect(
+            yield* searchSqlAfter`SELECT rowid FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH 'reconciliation'`,
+          ).toHaveLength(1);
           expect((yield* projections.getThreadProjection(threadId)).thread.title).toBe("tail");
 
           // A corrupt recovery chunk must roll the whole rebuild transaction back.
@@ -182,6 +215,10 @@ it.effect(
         yield* Effect.gen(function* () {
           const maintenance = yield* Maintenance.ProjectionMaintenanceV2;
           expect((yield* maintenance.rebuild).valid).toBe(true);
+          const searchSqlAfter = yield* SqlClient.SqlClient;
+          expect(
+            yield* searchSqlAfter`SELECT rowid FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH 'reconciliation'`,
+          ).toHaveLength(1);
         }).pipe(Effect.provide(databaseLayer(repacked)));
       } finally {
         NodeFS.rmSync(dir, { recursive: true, force: true });
