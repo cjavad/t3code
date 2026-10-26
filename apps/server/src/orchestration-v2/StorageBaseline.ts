@@ -30,13 +30,15 @@ export const restoreStorageBaseline = Effect.fn("StorageBaseline.restore")(funct
   const boundary = baseline[0];
   if (boundary === undefined) return { applicationSequence: 0, agentSequence: 0 };
   if (boundary.format_version !== 1) throw new Error("Unsupported storage baseline version");
+  // Search insert triggers need parent lineage before restoring messages.
   const tables = yield* sql<{
     table_name: string;
     columns_json: string;
     row_count: number;
     sha256: string;
   }>`
-    SELECT table_name, columns_json, row_count, sha256 FROM orchestration_storage_tables ORDER BY table_name
+    SELECT table_name, columns_json, row_count, sha256 FROM orchestration_storage_tables
+    ORDER BY CASE WHEN table_name = 'orchestration_v2_projection_threads' THEN 0 ELSE 1 END, table_name
   `;
   const indexed = new Set<string>(COMPRESSED_PROJECTION_TABLES);
   for (const table of tables) {

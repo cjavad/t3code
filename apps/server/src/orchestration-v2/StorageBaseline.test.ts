@@ -124,6 +124,41 @@ it.effect(
                 },
               },
               {
+                id: EventId.make("storage:subagent-thread"),
+                type: "thread.created",
+                threadId: ThreadId.make("thread:subagent"),
+                occurredAt: now,
+                payload: {
+                  ...thread,
+                  id: ThreadId.make("thread:subagent"),
+                  lineage: {
+                    parentThreadId: threadId,
+                    relationshipToParent: "subagent",
+                    rootThreadId: threadId,
+                  },
+                },
+              },
+              {
+                id: EventId.make("storage:subagent-message"),
+                type: "message.updated",
+                threadId: ThreadId.make("thread:subagent"),
+                occurredAt: now,
+                payload: {
+                  id: MessageId.make("message:subagent"),
+                  threadId: ThreadId.make("thread:subagent"),
+                  runId: null,
+                  nodeId: null,
+                  createdBy: "agent",
+                  creationSource: "provider",
+                  role: "assistant",
+                  text: "subagentsecret",
+                  attachments: [],
+                  streaming: false,
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              },
+              {
                 id: EventId.make("storage:item"),
                 type: "turn-item.updated",
                 threadId,
@@ -141,7 +176,7 @@ it.effect(
           });
         }).pipe(Effect.provide(databaseLayer(source)));
         const report = compactSqliteDatabase({ source, destination: compacted });
-        expect(report.removedEventCount).toBe(3);
+        expect(report.removedEventCount).toBe(4);
         expect(report.trimmedOutputCount).toBe(1);
         yield* Effect.gen(function* () {
           const sink = yield* Sink.EventSinkV2;
@@ -172,6 +207,9 @@ it.effect(
           });
           expect((yield* maintenance.rebuild).valid).toBe(true);
           const searchSqlAfter = yield* SqlClient.SqlClient;
+          expect(
+            yield* searchSqlAfter`SELECT rowid FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH 'subagentsecret'`,
+          ).toHaveLength(0);
           expect(
             yield* searchSqlAfter`SELECT rowid FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH 'reconciliation'`,
           ).toHaveLength(1);
@@ -216,6 +254,9 @@ it.effect(
           const maintenance = yield* Maintenance.ProjectionMaintenanceV2;
           expect((yield* maintenance.rebuild).valid).toBe(true);
           const searchSqlAfter = yield* SqlClient.SqlClient;
+          expect(
+            yield* searchSqlAfter`SELECT rowid FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH 'subagentsecret'`,
+          ).toHaveLength(0);
           expect(
             yield* searchSqlAfter`SELECT rowid FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH 'reconciliation'`,
           ).toHaveLength(1);
