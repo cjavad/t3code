@@ -954,7 +954,7 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
       />
       <CloudDeviceOwnership
         environmentId={primaryEnvironmentId}
-        rowClassName={accessRowClassName(presentation)}
+        rowClassName={ITEM_ROW_CLASSNAME}
       />
     </>
   );
