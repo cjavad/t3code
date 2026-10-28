@@ -1,6 +1,8 @@
 import type { AuthCloudDevice, EnvironmentId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import * as Effect from "effect/Effect";
+import { Atom } from "effect/reactivity";
 
 import { assignServerCloudDevice, fetchServerCloudDevices } from "../../environments/primary/auth";
 import { useEnvironmentQuery } from "../../state/query";
@@ -9,6 +11,8 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { toastManager } from "../ui/toast";
 
 const UNASSIGNED = "unassigned";
+
+const cloudDevicesAtom = Atom.make(Effect.tryPromise(() => fetchServerCloudDevices()));
 
 const shortThumbprint = (thumbprint: string) => `${thumbprint.slice(0, 8)}…`;
 
@@ -30,7 +34,8 @@ export function CloudDeviceOwnership({
   readonly environmentId: EnvironmentId | null;
   readonly rowClassName: string;
 }) {
-  const [devices, setDevices] = useState<ReadonlyArray<AuthCloudDevice> | null>(null);
+  const devicesQuery = useEnvironmentQuery(cloudDevicesAtom);
+  const devices = devicesQuery.data;
   const [busyThumbprint, setBusyThumbprint] = useState<string | null>(null);
   const users = useEnvironmentQuery(
     environmentId === null
@@ -38,20 +43,11 @@ export function CloudDeviceOwnership({
       : sourceControlEnvironment.gitIdentityUsers({ environmentId, input: {} }),
   );
 
-  const load = () => {
-    void fetchServerCloudDevices().then(setDevices, () => setDevices([]));
-  };
-
-  // oxlint-disable-next-line t3code/react-effect-budget -- Fetch device ownership from the server when settings mount.
-  useEffect(() => {
-    void fetchServerCloudDevices().then(setDevices, () => setDevices([]));
-  }, []);
-
   const assign = async (device: AuthCloudDevice, userId: string | null) => {
     setBusyThumbprint(device.proofKeyThumbprint);
     try {
       await assignServerCloudDevice({ proofKeyThumbprint: device.proofKeyThumbprint, userId });
-      load();
+      devicesQuery.refresh();
     } catch (error) {
       toastManager.add({
         type: "error",

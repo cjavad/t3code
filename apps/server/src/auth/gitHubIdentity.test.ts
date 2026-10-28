@@ -1,3 +1,5 @@
+import * as GitHubAppAccess from "@t3tools/source-control-github/server/GitHubAppAccess";
+import * as GitHubAppSignIn from "@t3tools/source-control-github/server/GitHubAppSignIn";
 import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 import * as GitHubGraphQlClient from "@t3tools/source-control-github/server/gitHubGraphQlClient";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -54,6 +56,14 @@ it.effect("binds REST and GraphQL to each person and rereads rotated tokens with
                   );
                 }),
               ),
+              Layer.mock(GitHubAppSignIn.GitHubAppSignIn)({
+                enabled: false,
+                token: () => Effect.succeedNone,
+                invalidate: () => Effect.void,
+              }),
+              Layer.mock(GitHubAppAccess.GitHubAppAccess)({
+                reach: () => Effect.succeed("signed-out"),
+              }),
               GitHubQuota.layer,
               SourceControlRateLimit.layer,
             ),
@@ -153,6 +163,14 @@ it.effect("verifies the page account and writes PR actions under the personal cr
                   );
                 }),
               ),
+              Layer.mock(GitHubAppSignIn.GitHubAppSignIn)({
+                enabled: false,
+                token: () => Effect.succeedNone,
+                invalidate: () => Effect.void,
+              }),
+              Layer.mock(GitHubAppAccess.GitHubAppAccess)({
+                reach: () => Effect.succeed("signed-out"),
+              }),
               GitHubQuota.layer,
               SourceControlRateLimit.layer,
             ),
