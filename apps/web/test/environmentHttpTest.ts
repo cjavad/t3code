@@ -112,7 +112,6 @@ export async function installEnvironmentHttpTest(scenario: EnvironmentHttpTestSc
                 );
               }),
             )
-            .handle("pairingLinks", () => unexpectedEndpoint("auth.pairingLinks"))
             .handle("revokePairingLink", () => unexpectedEndpoint("auth.revokePairingLink"))
             .handle("cloudDevices", () => unexpectedEndpoint("auth.cloudDevices"))
             .handle("assignCloudDevice", () => unexpectedEndpoint("auth.assignCloudDevice"))
