@@ -17,7 +17,8 @@ const credentialForToken = (token: Redacted.Redacted<string>) => ({
 });
 
 /** Read on each operation so credential rotation does not require reconnecting. */
-export const withSubject = Effect.fn("GitHubIdentity.withSubject")(function* <A, E, R>(
+// Cached lookup fibers must not retain callers' operations through Effect.fn stack frames.
+export const withSubject = Effect.fnUntraced(function* <A, E, R>(
   subject: string,
   operation: Effect.Effect<A, E, R>,
 ) {
@@ -31,10 +32,10 @@ export const withSubject = Effect.fn("GitHubIdentity.withSubject")(function* <A,
     Effect.provideService(GitHubApi.PinnedGitHubCredential, credential),
     Effect.provideService(SourceControlRateLimit.CredentialScope, credential.credentialFingerprint),
   );
-});
+}, Effect.withSpan("GitHubIdentity.withSubject"));
 
 /** Background readers follow the persisted thread owner, not the triggering session. */
-const withThreadIdentity = Effect.fn("GitHubIdentity.withThreadIdentity")(function* <A, E, R>(
+const withThreadIdentity = Effect.fnUntraced(function* <A, E, R>(
   identity: OrchestrationV2ThreadGitIdentity | null | undefined,
   operation: Effect.Effect<A, E, R>,
 ) {
@@ -45,7 +46,7 @@ const withThreadIdentity = Effect.fn("GitHubIdentity.withThreadIdentity")(functi
   if (user === null)
     return yield* Effect.die(new Error("The thread Git identity no longer exists."));
   return yield* withSubject(user.subject, operation);
-});
+}, Effect.withSpan("GitHubIdentity.withThreadIdentity"));
 
 /** Capture only identity services when building a layer; keep each caller's API context. */
 export const make = Effect.gen(function* () {

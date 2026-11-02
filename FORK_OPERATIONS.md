@@ -31,16 +31,18 @@ touches, **refactor the patch to match** — never duct-tape around it.
 - **Identity & signing** — per-user Git identity / commit signing; `AuthUsers`.
 - **Cloud device ownership** — T3 Connect devices mapped to a user
   (`CloudDevices`, migration 1002); `cloud-connect` never gets a user row.
-- **Thread notes** — human-only messages (`role: "note"`) that never reach a
-  provider, plus per-message author attribution.
+- **Message attribution** — per-message author names. Human-only thread notes
+  have been removed, including stored notes (migration 1004).
+- **Compressed storage** — immutable rebuild baselines and bounded tool-output
+  retention; baseline restoration must reapply later projection schema repairs.
 - **Rebase adaptation** — the minimum needed to compile and pass tests after
   each rebase (e.g. renamed upstream APIs). Fold real fixes into the owning
   patch; use an adaptation commit only for pure upstream drift.
 
 ## Migrations
 
-Upstream currently uses `1..67`. Fork migrations are `1001` (users), `1002`
-(cloud devices), and `1003` (compressed storage). Released fork builds used
+Upstream currently uses `1..77`. Fork migrations are `1001` (users), `1002`
+(cloud devices), `1003` (compressed storage), and `1004` (remove human notes). Released fork builds used
 63/64/65; `reconcileForkMigrationGap` moves those ledger entries by their exact
 names, preserves their timestamps, and applies missing upstream migrations in a
 transaction. It also fills future upstream gaps below 1001 on subsequent updates.
@@ -75,8 +77,8 @@ git worktree add -b reconcile/<date> /root/t3code-reconcile origin/main
 The explicit main fetch also works in older checkouts whose default origin
 fetch still names the now-deleted `t3code/codex-turn-mapping` branch.
 
-Keep migrations 63 and 64 unchanged: running fork databases already have them.
-Check the live migration ledger read-only, then verify startup and data reads
+Preserve released migration meanings; historical fork entries are relocated by
+name into the 1001+ range. Check the live migration ledger read-only, then verify startup and data reads
 against a consistent SQLite backup of the running database. Never point the
 candidate at live state. Run focused tests for the fork features, affected
 package typechecks, and lint/format checks for changed files.
@@ -87,7 +89,10 @@ refs and restart the production service only as an explicit deployment step.
 
 ## Deploy
 
-Deployment clones `fork/deploy` from GitHub, so the commit must be pushed first.
+The current `/root/t3-remote/update.sh` deployment clones
+`reconcile/upstream-main-20261026` from GitHub (overridable with `T3_REF`), so the
+verified commit must be pushed first. Historical `fork/deploy` refs do not
+control this installation.
 
 **Before moving `fork/deploy`, check the live database ledger against the target's
 migration manifest — a fresh-DB smoke test cannot catch this.** Upstream reuses

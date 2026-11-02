@@ -1115,6 +1115,8 @@ it.effect("keeps cached PR status separate for people sharing the same checkout"
         Layer.provide(layerBackgroundPolicy(() => true)),
         Layer.provide(
           Layer.mock(GitWorkflowService.GitWorkflowService)({
+            currentBranch: () => Effect.succeed(baseLocalStatus.refName),
+            invalidateRemoteStatus: () => Effect.void,
             localStatus: () => Effect.succeed(baseLocalStatus),
             remoteStatus: () =>
               SourceControlRateLimit.CredentialScope.pipe(

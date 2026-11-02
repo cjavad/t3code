@@ -54,9 +54,8 @@ export function CloudDeviceOwnership({
         title: "Could not change who this device acts as",
         description: error instanceof Error ? error.message : String(error),
       });
-    } finally {
-      setBusyThumbprint(null);
     }
+    setBusyThumbprint(null);
   };
 
   if (devices === null || devices.length === 0) return null;

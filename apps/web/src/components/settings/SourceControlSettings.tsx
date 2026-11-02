@@ -409,9 +409,14 @@ function GitIdentitySettings({ environmentId }: { readonly environmentId: Enviro
       } else {
         toastManager.add({ type: "error", title: "Git identity could not be saved" });
       }
-    } finally {
-      setSaving(false);
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Git identity could not be saved",
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
+    setSaving(false);
   };
 
   return (

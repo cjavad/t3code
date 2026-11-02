@@ -131,6 +131,7 @@ describe("reconcileDesiredCloudLink", () => {
           Layer.provide(
             Layer.mergeAll(
               Layer.mock(CloudDevices.CloudDeviceRepository)({}),
+              ManagedPolicy.layerTest(),
               Layer.mock(ConnectReachability.ConnectReachability)({
                 latest: Effect.succeedNone,
               }),
