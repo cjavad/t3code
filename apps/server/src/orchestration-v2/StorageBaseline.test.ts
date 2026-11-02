@@ -11,6 +11,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   TurnItemId,
+  NodeId,
   type OrchestrationV2AppThread,
 } from "@t3tools/contracts";
 import { compactSqliteDatabase } from "@t3tools/shared/compactSqliteDatabase";
@@ -159,6 +160,34 @@ it.effect(
                 },
               },
               {
+                id: EventId.make("storage:subagent"),
+                type: "subagent.updated",
+                threadId,
+                occurredAt: now,
+                payload: {
+                  id: NodeId.make("storage:task"),
+                  threadId,
+                  runId: null,
+                  parentNodeId: NodeId.make("storage:parent"),
+                  origin: "app_owned",
+                  createdBy: "agent",
+                  driver: "codex",
+                  providerInstanceId,
+                  providerThreadId: null,
+                  childThreadId: null,
+                  nativeTaskRef: null,
+                  prompt: "Completed task",
+                  title: null,
+                  model: null,
+                  completionDelivery: { state: "disposed", observedByRunId: null },
+                  status: "completed",
+                  result: "Done",
+                  startedAt: now,
+                  completedAt: now,
+                  updatedAt: now,
+                },
+              },
+              {
                 id: EventId.make("storage:item"),
                 type: "turn-item.updated",
                 threadId,
@@ -174,9 +203,14 @@ it.effect(
               },
             ],
           });
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`DROP INDEX orchestration_v2_projection_subagents_settled_idx`;
+          yield* sql`ALTER TABLE orchestration_v2_projection_subagents DROP COLUMN completion_delivery_state`;
+          yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json = json_set(payload_json, '$.settledOverride', json('true')) WHERE thread_id = ${threadId}`;
+          yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id IN (75,77)`;
         }).pipe(Effect.provide(databaseLayer(source)));
         const report = compactSqliteDatabase({ source, destination: compacted });
-        expect(report.removedEventCount).toBe(4);
+        expect(report.removedEventCount).toBe(5);
         expect(report.trimmedOutputCount).toBe(1);
         yield* Effect.gen(function* () {
           const sink = yield* Sink.EventSinkV2;
@@ -207,6 +241,12 @@ it.effect(
           });
           expect((yield* maintenance.rebuild).valid).toBe(true);
           const searchSqlAfter = yield* SqlClient.SqlClient;
+          expect((yield* projections.getThreadProjection(threadId)).thread.settledOverride).toBe(
+            "settled",
+          );
+          expect(
+            yield* searchSqlAfter`SELECT completion_delivery_state FROM orchestration_v2_projection_subagents`,
+          ).toEqual([{ completion_delivery_state: "disposed" }]);
           expect(
             yield* searchSqlAfter`SELECT rowid FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH 'subagentsecret'`,
           ).toHaveLength(0);
@@ -248,6 +288,10 @@ it.effect(
         // Repack from an independently compacted copy to avoid the intentionally corrupt fixture.
         const healthy = NodePath.join(dir, "healthy.sqlite");
         compactSqliteDatabase({ source, destination: healthy });
+        yield* Effect.gen(function* () {
+          const maintenance = yield* Maintenance.ProjectionMaintenanceV2;
+          expect((yield* maintenance.verify).valid).toBe(true);
+        }).pipe(Effect.provide(databaseLayer(healthy)));
         const next = compactSqliteDatabase({ source: healthy, destination: repacked });
         expect(next.agentSequence).toBe(report.agentSequence);
         yield* Effect.gen(function* () {

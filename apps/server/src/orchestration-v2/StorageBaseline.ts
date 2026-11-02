@@ -1,3 +1,4 @@
+import repairBooleanSettledOverride from "../persistence/Migrations/077_RepairBooleanSettledOverride.ts";
 import { canonicalizeThreadPullRequestProjections } from "../persistence/Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
 // @effect-diagnostics nodeBuiltinImport:off - baseline digest uses the same format as the offline exporter.
 import * as NodeCrypto from "node:crypto";
@@ -95,6 +96,10 @@ export const restoreStorageBaseline = Effect.fn("StorageBaseline.restore")(funct
   }
   // Older immutable baselines predate the upstream PR link migration.
   yield* canonicalizeThreadPullRequestProjections();
+  // Immutable baselines predate columns and payload repairs added by later migrations.
+  yield* sql`UPDATE orchestration_v2_projection_subagents
+    SET completion_delivery_state = json_extract(payload_json, '$.completionDelivery.state')`;
+  yield* repairBooleanSettledOverride;
   return {
     applicationSequence: boundary.application_sequence,
     agentSequence: boundary.agent_sequence,
