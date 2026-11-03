@@ -3234,6 +3234,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         Effect.provide(
           Layer.mergeAll(
             NodeServices.layer,
+            NodeCrypto.layer,
             Layer.mock(GitIdentityService)({
               resolveGitHubToken: (subject) => Effect.succeed(Redacted.make(`${subject}-token`)),
             }),

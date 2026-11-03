@@ -10,6 +10,7 @@ import {
 } from "@t3tools/shared/compressedSqlite";
 import { isBaselineTable } from "@t3tools/shared/sqliteStorageSchema";
 import * as Effect from "effect/Effect";
+import * as Arr from "effect/Array";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Schema from "effect/Schema";
 
@@ -84,7 +85,7 @@ export const restoreStorageBaseline = Effect.fn("StorageBaseline.restore")(funct
             });
           return record;
         });
-        if (records.length > 0)
+        if (Arr.isArrayNonEmpty(records))
           yield* sql`INSERT INTO ${sql(table.table_name)} ${sql.insert(records)}`;
         cursor = chunk.chunk_id;
       }

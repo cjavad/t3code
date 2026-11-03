@@ -251,7 +251,7 @@ describe("V2 environment commands", () => {
         deliveryIntent: "auto",
         dispatchMode: { type: "start_immediately" },
       });
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(Effect.provide(layerTestRandom)),
   );
 
   it.effect("preserves an existing worktree and branch during first-message launch", () =>

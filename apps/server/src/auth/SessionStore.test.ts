@@ -612,7 +612,7 @@ it.effect("cookie and WebSocket credentials follow a corrected persisted person 
     Effect.provide(
       layerSessionStore().pipe(
         Layer.provideMerge(SqlitePersistence.layerMemory),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       ),
     ),
   ),

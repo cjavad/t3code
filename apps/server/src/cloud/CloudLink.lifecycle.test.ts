@@ -190,7 +190,7 @@ describe("reconcileDesiredCloudLink", () => {
         HttpClient.make(() => unusedSecretStoreOperation()),
       ),
       Effect.provideService(AgentAwarenessRelay.AgentAwarenessRelay, idleAwarenessRelay),
-      Effect.provide(NodeServices.layer),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     ),
   );
 });
