@@ -158,7 +158,10 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
         return (
           <>
             <div className="group/details-items thread-details-stack flex flex-col gap-1">
-              {!props.draftId || Object.values(show).some(Boolean) || visible.usage || visible.context ? (
+              {!props.draftId ||
+              Object.values(show).some(Boolean) ||
+              visible.usage ||
+              visible.context ? (
                 <section aria-label="Workspace" className="surface-tray rounded-pane p-1">
                   <div className="surface-composer rounded-lg p-0.5">
                     {show.environment ? (

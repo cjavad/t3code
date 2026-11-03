@@ -66,16 +66,15 @@ export function CloudDeviceOwnership({
         <div key={device.proofKeyThumbprint} className={rowClassName}>
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm">
+              <p className="truncate text-label">
                 {device.label ?? `T3 Connect device ${shortThumbprint(device.proofKeyThumbprint)}`}
               </p>
-              <p className="truncate text-xs text-muted-foreground/60">
+              <p className="truncate text-meta text-muted-foreground/60">
                 {device.userId === null
                   ? "Acts as nobody. cannot author messages or commit"
                   : "Commits and messages are attributed to this user"}
-                {" · "}
-                {lastSeenLabel(device)}
               </p>
+              <p className="text-meta text-muted-foreground/60">{lastSeenLabel(device)}</p>
             </div>
             <Select
               value={device.userId ?? UNASSIGNED}

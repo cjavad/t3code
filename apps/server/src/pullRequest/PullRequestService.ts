@@ -3023,39 +3023,37 @@ export const make = Effect.gen(function* () {
     },
   );
   // Shared flights own their tracing boundary so cached fibers cannot retain caller spans.
-  const list: PullRequestService["Service"]["list"] = Effect.fnUntraced(
-    function* (input) {
-      const scope = yield* SourceControlRateLimit.CredentialScope;
-      // @effect-diagnostics-next-line preferSchemaOverJson:off - internal positional cache key, decoded by the loader.
-      const key = JSON.stringify([
-        listingsEpoch,
-        input.state,
-        input.involvement ?? null,
-        // Positional so two identical filter sets key alike however their record was assembled.
-        input.filters === undefined
-          ? null
-          : [
-              input.filters.draft ?? null,
-              input.filters.review ?? null,
-              input.filters.checks ?? null,
-              input.filters.author ?? null,
-              input.filters.labels ?? null,
-              input.filters.excludedLabels ?? null,
-            ],
-        input.projectId ?? null,
-        // Sorted so the same narrowing keys alike however the caller ordered it.
-        input.projectIds === undefined ? null : [...input.projectIds].sort(),
-        input.host ?? null,
-        input.limit ?? null,
-        input.query ?? null,
-        input.cursors === undefined
-          ? null
-          : Object.entries(input.cursors).toSorted(([left], [right]) => left.localeCompare(right)),
-        scope,
-      ]);
-      return yield* getShared(listCache, key);
-    },
-  );
+  const list: PullRequestService["Service"]["list"] = Effect.fnUntraced(function* (input) {
+    const scope = yield* SourceControlRateLimit.CredentialScope;
+    // @effect-diagnostics-next-line preferSchemaOverJson:off - internal positional cache key, decoded by the loader.
+    const key = JSON.stringify([
+      listingsEpoch,
+      input.state,
+      input.involvement ?? null,
+      // Positional so two identical filter sets key alike however their record was assembled.
+      input.filters === undefined
+        ? null
+        : [
+            input.filters.draft ?? null,
+            input.filters.review ?? null,
+            input.filters.checks ?? null,
+            input.filters.author ?? null,
+            input.filters.labels ?? null,
+            input.filters.excludedLabels ?? null,
+          ],
+      input.projectId ?? null,
+      // Sorted so the same narrowing keys alike however the caller ordered it.
+      input.projectIds === undefined ? null : [...input.projectIds].sort(),
+      input.host ?? null,
+      input.limit ?? null,
+      input.query ?? null,
+      input.cursors === undefined
+        ? null
+        : Object.entries(input.cursors).toSorted(([left], [right]) => left.localeCompare(right)),
+      scope,
+    ]);
+    return yield* getShared(listCache, key);
+  });
 
   const checksCache = yield* Cache.makeWith(
     (key: string) => {
