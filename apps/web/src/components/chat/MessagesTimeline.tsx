@@ -1774,10 +1774,18 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
   const isLatestRun = latestRunId === row.runId;
   // One line says why the run failed: its error, unless the composer banner
   // already does, then the provider notice that carries the limit's reset.
+  const limit = row.ending === "limited" && usageLimit?.runId === row.runId ? usageLimit : null;
+  let resetTime: string | null = null;
+  if (row.ending === "limited" && row.failureResetAt && !limit?.resetAt) {
+    const timeZone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+    resetTime = `${formatUpcomingTimestamp(row.failureResetAt, ctx.timestampFormat, undefined, timeZone)} (${timeZone})`;
+  }
   const failureLine =
-    row.failureMessage !== null && !(isLatestRun && row.failureMessage === threadErrorMessage)
-      ? row.failureMessage
-      : row.noticeMessage;
+    row.ending === "limited" && resetTime
+      ? `Usage limit reached. Retry after ${resetTime}.`
+      : row.failureMessage !== null && !(isLatestRun && row.failureMessage === threadErrorMessage)
+        ? row.failureMessage
+        : row.noticeMessage;
   const labelClassName = cn(
     "flex shrink-0 items-center gap-2 self-stretch text-label whitespace-nowrap tabular-nums",
     row.ending === "failed"
@@ -1795,7 +1803,6 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
       </span>
     </>
   );
-  const limit = row.ending === "limited" && usageLimit?.runId === row.runId ? usageLimit : null;
 
   return (
     <div>
@@ -1887,10 +1894,12 @@ function TurnFoldUsageLimit({
   const nowMs = Date.parse(`${nowMinute}:00Z`);
   const resetPassed = useDeadlinePassed(limit.resetAt === null ? null : Date.parse(limit.resetAt));
   if (!limit.resetAt || resetPassed || !(Date.parse(limit.resetAt) > nowMs)) return null;
+  const timeZone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
   return (
     <>
       <span className="shrink-0 text-meta text-muted-foreground">
-        resumes {formatUpcomingTimestamp(limit.resetAt, timestampFormat, nowMs)}
+        resumes {formatUpcomingTimestamp(limit.resetAt, timestampFormat, nowMs, timeZone)} (
+        {timeZone})
       </span>
       {limit.onToggleSnooze ? (
         <WorkingBarChip
