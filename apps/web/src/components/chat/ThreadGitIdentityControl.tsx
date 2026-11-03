@@ -105,7 +105,7 @@ export function ThreadGitIdentityControl(props: {
           {assigned?.githubUsername ? (
             <GitHubAvatar
               username={assigned.githubUsername}
-              className="-mx-0.5 size-4 shrink-0 rounded-full bg-muted object-cover"
+              className="size-4 shrink-0 rounded-full bg-muted object-cover"
             />
           ) : (
             <UserRoundIcon aria-hidden="true" className={THREAD_DETAILS_PANEL_ICON_CLASS} />
@@ -143,7 +143,7 @@ export function ThreadGitIdentityControl(props: {
         </MenuPopup>
       </Menu>
       {warning === null ? null : (
-        <p className="flex items-start gap-1.5 px-2.5 pb-1 text-2xs leading-relaxed text-muted-foreground">
+        <p className="flex items-start gap-1.5 px-2.5 pb-1 text-micro leading-relaxed text-muted-foreground">
           <AlertTriangleIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0 text-warning" />
           <span className="min-w-0">{warning}</span>
         </p>
