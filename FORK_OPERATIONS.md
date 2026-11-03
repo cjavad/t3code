@@ -41,7 +41,7 @@ touches, **refactor the patch to match** — never duct-tape around it.
 
 ## Migrations
 
-Upstream currently uses `1..77`. Fork migrations are `1001` (users), `1002`
+Upstream currently uses `1..78`. Fork migrations are `1001` (users), `1002`
 (cloud devices), `1003` (compressed storage), and `1004` (remove human notes). Released fork builds used
 63/64/65; `reconcileForkMigrationGap` moves those ledger entries by their exact
 names, preserves their timestamps, and applies missing upstream migrations in a

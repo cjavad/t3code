@@ -653,7 +653,7 @@ const makeEventStore = Effect.gen(function* () {
   const latestAgentSequence: OrchestrationEventStore["Service"]["latestAgentSequence"] = (
     threadId,
   ) =>
-    sql<{ sequence: number | null }>`
+    sql<{ readonly sequence: number | null }>`
       SELECT MAX(sequence) AS sequence FROM (
         SELECT MAX(sequence) AS sequence FROM orchestration_events
           ${threadId === undefined ? sql`INDEXED BY idx_orchestration_events_application_high_water` : sql`INDEXED BY idx_orchestration_events_agent_stream_sequence`}

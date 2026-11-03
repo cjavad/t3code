@@ -1,5 +1,6 @@
 import * as AuthUsers from "../persistence/AuthUsers.ts";
 import * as CloudDevices from "../persistence/CloudDevices.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import {
@@ -115,7 +116,7 @@ const layerLinkProofRoutes = HttpApiBuilder.layer(LinkProofTestApi).pipe(
   Layer.provideMerge(ServerSecretStore.layer),
   Layer.provide(layerConfig),
   Layer.provideMerge(HttpPlatform.layer.pipe(Layer.provideMerge(Etag.layerWeak))),
-  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 
 const withLinkProofClient = async (
